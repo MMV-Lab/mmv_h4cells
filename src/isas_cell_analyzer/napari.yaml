@@ -15,18 +15,9 @@ contributions:
     - id: ISAS-Cell-Analyzer.write_single_image
       python_name: isas_cell_analyzer._writer:write_single_image
       title: Save image data with Cell Analyzer
-    - id: ISAS-Cell-Analyzer.make_container_widget
-      python_name: isas_cell_analyzer:ImageThreshold
-      title: Make threshold Container widget
-    - id: ISAS-Cell-Analyzer.make_magic_widget
-      python_name: isas_cell_analyzer:threshold_magic_widget
-      title: Make threshold magic widget
-    - id: ISAS-Cell-Analyzer.make_function_widget
-      python_name: isas_cell_analyzer:threshold_autogenerate_widget
-      title: Make threshold function widget
     - id: ISAS-Cell-Analyzer.make_qwidget
-      python_name: isas_cell_analyzer:ExampleQWidget
-      title: Make example QWidget
+      python_name: isas_cell_analyzer:CellAnalyzer
+      title: Make Cell Analyzer
   readers:
     - command: ISAS-Cell-Analyzer.get_reader
       accepts_directories: false
@@ -39,12 +30,5 @@ contributions:
       layer_types: ['image']
       filename_extensions: ['.npy']
   widgets:
-    - command: ISAS-Cell-Analyzer.make_container_widget
-      display_name: Container Threshold
-    - command: ISAS-Cell-Analyzer.make_magic_widget
-      display_name: Magic Threshold
-    - command: ISAS-Cell-Analyzer.make_function_widget
-      autogenerate: true
-      display_name: Autogenerate Threshold
     - command: ISAS-Cell-Analyzer.make_qwidget
-      display_name: Example QWidget
+      display_name: Cell Analyzer
