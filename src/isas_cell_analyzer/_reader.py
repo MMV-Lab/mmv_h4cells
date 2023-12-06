@@ -1,11 +1,37 @@
-"""
-This module is an example of a barebones numpy reader plugin for napari.
+from qtpy.QtWidgets import QFileDialog
+import csv
+import tifffile
 
-It implements the Reader specification, but your plugin may choose to
-implement multiple readers or even other plugin contributions. see:
-https://napari.org/stable/plugins/guides.html?#readers
-"""
-import numpy as np
+
+def open_dialog(parent, filetype="*.csv", directory=""):
+    """
+    Opens a dialog to select a file to open
+
+    Parameters
+    ----------
+    parent : QWidget
+        Parent widget for the dialog
+    filetype : str
+        Only files of this file type will be displayed
+    directory : str
+        Opens view at the specified directory
+
+    Returns
+    -------
+    str
+        Path of the selected file
+    """
+    dialog = QFileDialog()
+    dialog.setNameFilter(filetype)
+    filepath = dialog.getExistingDirectory(
+        parent, "Select CSV-File", directory=directory
+    )
+    return filepath
+
+
+def read(path):
+    reader = napari_get_reader(path)
+    return reader(path)
 
 
 def napari_get_reader(path):
@@ -22,51 +48,58 @@ def napari_get_reader(path):
         If the path is a recognized format, return a function that accepts the
         same path or list of paths, and returns a list of layer data tuples.
     """
-    if isinstance(path, list):
-        # reader plugins may be handed single path, or a list of paths.
-        # if it is a list, it is assumed to be an image stack...
-        # so we are only going to look at the first file.
-        path = path[0]
 
-    # if we know we cannot read the file, we immediately return None.
-    if not path.endswith(".npy"):
-        return None
+    if path.endswith(".csv"):
+        return read_csv
 
-    # otherwise we return the *function* that can read ``path``.
-    return reader_function
+    if path.endswith(".tiff"):
+        return read_tiff
+
+    return None
 
 
-def reader_function(path):
-    """Take a path or list of paths and return a list of LayerData tuples.
-
-    Readers are expected to return data as a list of tuples, where each tuple
-    is (data, [add_kwargs, [layer_type]]), "add_kwargs" and "layer_type" are
-    both optional.
-
-    Parameters
-    ----------
-    path : str or list of str
-        Path to file, or list of paths.
-
-    Returns
-    -------
-    layer_data : list of tuples
-        A list of LayerData tuples where each tuple in the list contains
-        (data, metadata, layer_type), where data is a numpy array, metadata is
-        a dict of keyword arguments for the corresponding viewer.add_* method
-        in napari, and layer_type is a lower-case string naming the type of
-        layer. Both "meta", and "layer_type" are optional. napari will
-        default to layer_type=="image" if not provided
+def read_csv(path):  # adjust if needed if metrics are added
     """
-    # handle both a string and a list of strings
-    paths = [path] if isinstance(path, str) else path
-    # load all files into array
-    arrays = [np.load(_path) for _path in paths]
-    # stack arrays into single array
-    data = np.squeeze(np.stack(arrays))
+    Reads data from a CSV file and processes each row.
 
-    # optional kwargs for the corresponding viewer.add_* method
-    add_kwargs = {}
+    Parameters:
+    - path (str): The file path to the CSV file.
 
-    layer_type = "image"  # optional, default is "image"
-    return [(data, add_kwargs, layer_type)]
+    Returns:
+    - tuple: A tuple containing a list of data and a tuple representing the last row read.
+      The list of data contains tuples for rows where the first element is an integer.
+      The last row is returned separately if its first element is a float.
+    """
+    data = (
+        []
+    )  # List to store tuples of rows with the first element as an integer
+    metrics = ()  # Tuple to store the metrics if its first element is a float
+    pixelsize = ()
+
+    with open(path, "r") as file:
+        csv_reader = csv.reader(file)
+
+        for row in csv_reader:
+            # Skip empty rows
+            if len(row) == 0 or isinstance(row[0], str):
+                continue
+
+            # Check the type of the first element in the row
+            if isinstance(row[1], int):
+                data.append(tuple(row))
+            elif isinstance(row[1], float):
+                # If the second element is a float, store the row separately
+                metrics = tuple(row)
+            elif isinstance(row[1], str):
+                pixelsize = tuple(row)
+
+    if metrics == ():
+        # If the metric values happen to all be integers, they are now the last row of the data
+        metrics = data.pop(-1)
+
+    return data, metrics, pixelsize
+
+
+def read_tiff(path):
+    data = tifffile.imread(path)
+    return data

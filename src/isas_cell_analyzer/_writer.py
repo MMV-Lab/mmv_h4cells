@@ -1,64 +1,72 @@
-"""
-This module is an example of a barebones writer plugin for napari.
-
-It implements the Writer specification.
-see: https://napari.org/stable/plugins/guides.html?#writers
-
-Replace code below according to your needs.
-"""
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any, List, Sequence, Tuple, Union
-
-if TYPE_CHECKING:
-    DataType = Union[Any, Sequence[Any]]
-    FullLayerData = Tuple[DataType, dict, str]
+import numpy as np
+import csv
+from typing import List, Tuple
+import tifffile
+from qtpy.QtWidgets import QFileDialog
 
 
-def write_single_image(path: str, data: Any, meta: dict) -> List[str]:
-    """Writes a single image layer.
-    
+def save_dialog(parent, filetype=".csv", directory=""):
+    """
+    Opens a dialog to select a location to save a file
+
     Parameters
     ----------
-    path : str
-        A string path indicating where to save the image file.
-    data : The layer data
-        The `.data` attribute from the napari layer.
-    meta : dict
-        A dictionary containing all other attributes from the napari layer
-        (excluding the `.data` layer attribute).
+    parent : QWidget
+        Parent widget for the dialog
+    filetype : str
+        Only files of this file type will be displayed
+    directory : str
+        Opens view at the specified directory
 
     Returns
     -------
-    [path] : A list containing the string path to the saved file.
+    str
+        Path of selected file
     """
+    print("Prompting user to select save location")
+    dialog = QFileDialog()
+    dialog.setNameFilter(filetype)
+    print("Showing dialog")
+    filepath = dialog.getSaveFileName(
+        parent,
+        "Select location for CSV and TIFF-File to be created",
+        directory,
+    )
+    return filepath
 
-    # implement your writer logic here ...
 
-    # return path to any file(s) that were successfully written
-    return [path]
+def write(path: str, *data):
+    writer = get_writer(path)
+    writer(path, *data)
 
 
-def write_multiple(path: str, data: List[FullLayerData]) -> List[str]:
-    """Writes multiple layers of different types.
-    
-    Parameters
-    ----------
-    path : str
-        A string path indicating where to save the data file(s).
-    data : A list of layer tuples.
-        Tuples contain three elements: (data, meta, layer_type)
-        `data` is the layer data
-        `meta` is a dictionary containing all other metadata attributes
-        from the napari layer (excluding the `.data` layer attribute).
-        `layer_type` is a string, eg: "image", "labels", "surface", etc.
+def get_writer(path):
+    if path.endswith("csv"):
+        return write_csv
 
-    Returns
-    -------
-    [path] : A list containing (potentially multiple) string paths to the saved file(s).
-    """
+    if path.endswith("tiff"):
+        return write_tiff
 
-    # implement your writer logic here ...
+    return None
 
-    # return path to any file(s) that were successfully written
-    return [path]
+
+def write_csv(
+    path: str, data: List[Tuple[int, int]], metrics: Tuple[float, float], pixelsize: Tuple[float, str]
+):  # adjust if Metrics are added
+    with open(path, "w", newline="") as file:
+        csv_writer = csv.writer(file)
+
+        csv_writer.writerow(["ID", "Size"]) #, "metric name"
+        for row in data:
+            csv_writer.writerow(row)
+
+        csv_writer.writerow([])
+        csv_writer.writerow(["Mean size", "Std size"]) #, "metric name"
+        csv_writer.writerow(metrics)
+        csv_writer.writerow([])
+        csv_writer.writerow(["1 pixel equals:"])
+        csv_writer.writerow(pixelsize)
+
+
+def write_tiff(path: str, data: np.ndarray):
+    tifffile.imwrite(path, data)
