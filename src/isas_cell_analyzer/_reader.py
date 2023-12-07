@@ -1,5 +1,6 @@
 from qtpy.QtWidgets import QFileDialog
 import csv
+from aicsimageio import AICSImage
 import tifffile
 
 
@@ -22,9 +23,8 @@ def open_dialog(parent, filetype="*.csv", directory=""):
         Path of the selected file
     """
     dialog = QFileDialog()
-    dialog.setNameFilter(filetype)
-    filepath = dialog.getExistingDirectory(
-        parent, "Select CSV-File", directory=directory
+    filepath, _ = dialog.getOpenFileName(
+        parent, "Select CSV-File", directory, filetype, filetype
     )
     return filepath
 
@@ -49,10 +49,10 @@ def napari_get_reader(path):
         same path or list of paths, and returns a list of layer data tuples.
     """
 
-    if path.endswith(".csv"):
+    if path.suffix == ".csv":
         return read_csv
 
-    if path.endswith(".tiff"):
+    if path.suffix == ".tiff":
         return read_tiff
 
     return None
@@ -80,6 +80,15 @@ def read_csv(path):  # adjust if needed if metrics are added
         csv_reader = csv.reader(file)
 
         for row in csv_reader:
+            for i in range(len(row)):
+                try:
+                    number = float(row[i])
+                    if number.is_integer():
+                        row[i] = int(number)
+                    else:
+                        row[i] = number
+                except ValueError:
+                    pass
             # Skip empty rows
             if len(row) == 0 or isinstance(row[0], str):
                 continue
@@ -101,5 +110,5 @@ def read_csv(path):  # adjust if needed if metrics are added
 
 
 def read_tiff(path):
-    data = tifffile.imread(path)
+    data = AICSImage(path).get_image_data("YX")
     return data

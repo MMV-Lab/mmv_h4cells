@@ -1,11 +1,11 @@
 import numpy as np
 import csv
 from typing import List, Tuple
-import tifffile
+from aicsimageio.writers import OmeTiffWriter
 from qtpy.QtWidgets import QFileDialog
 
 
-def save_dialog(parent, filetype=".csv", directory=""):
+def save_dialog(parent, filetype="*.csv", directory=""):
     """
     Opens a dialog to select a location to save a file
 
@@ -23,15 +23,16 @@ def save_dialog(parent, filetype=".csv", directory=""):
     str
         Path of selected file
     """
-    print("Prompting user to select save location")
     dialog = QFileDialog()
-    dialog.setNameFilter(filetype)
-    print("Showing dialog")
-    filepath = dialog.getSaveFileName(
+    filepath, _ = dialog.getSaveFileName(
         parent,
         "Select location for CSV and TIFF-File to be created",
         directory,
+        filetype,
+        filetype,
     )
+    if not filepath.endswith(".csv"):
+        filepath += ".csv"
     return filepath
 
 
@@ -41,10 +42,10 @@ def write(path: str, *data):
 
 
 def get_writer(path):
-    if path.endswith("csv"):
+    if path.suffix == ".csv":
         return write_csv
 
-    if path.endswith("tiff"):
+    if path.suffix == ".tiff":
         return write_tiff
 
     return None
@@ -69,4 +70,4 @@ def write_csv(
 
 
 def write_tiff(path: str, data: np.ndarray):
-    tifffile.imwrite(path, data)
+    OmeTiffWriter.save(data, path, dim_order_out="YX")
