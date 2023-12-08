@@ -33,6 +33,11 @@ class CellAnalyzer(QWidget):
         self.current_cell_layer: Labels = (
             None  # label layer consisting of the current cell to evaluate
         )
+        self.included_layer: Labels = None  # label layer of all included cells
+        self.excluded_layer: Labels = None  # label layer of all excluded cells
+        self.remaining_layer: Labels = (
+            None  # label layer of all remaining cells
+        )
         self.metric_data: List[
             Tuple[int, int]
         ] = (
@@ -51,7 +56,7 @@ class CellAnalyzer(QWidget):
         ### QObjects
         # objects that can be updated are attributes of the class
         # for ease of access
-        
+
         # Logo
         filename = "logo.png"
         parent_directory = Path(__file__).resolve().parent
@@ -60,7 +65,15 @@ class CellAnalyzer(QWidget):
         image = cv2.imread(str(path))
         resized_image = cv2.resize(image, None, fx=0.5, fy=0.5)
         height, width, _ = resized_image.shape
-        logo_pixmap = QPixmap(QImage(resized_image.data, width, height, 3* width, QImage.Format_BGR888))
+        logo_pixmap = QPixmap(
+            QImage(
+                resized_image.data,
+                width,
+                height,
+                3 * width,
+                QImage.Format_BGR888,
+            )
+        )
 
         # Labels
         title = QLabel("ISAS Cell Analyzer")
@@ -96,6 +109,9 @@ class CellAnalyzer(QWidget):
         self.btn_include = QPushButton("Include")
         self.btn_exclude = QPushButton("Exclude")
         btn_undo = QPushButton("Undo")
+        self.btn_show_included = QPushButton("Show Included")
+        self.btn_show_excluded = QPushButton("Show Excluded")
+        self.btn_show_remaining = QPushButton("Show Remaining")
 
         self.btn_start_analysis.clicked.connect(self.start_analysis_on_click)
         self.btn_export.clicked.connect(self.export_on_click)
@@ -103,6 +119,9 @@ class CellAnalyzer(QWidget):
         self.btn_include.clicked.connect(self.include_on_click)
         self.btn_exclude.clicked.connect(self.exclude_on_click)
         btn_undo.clicked.connect(self.undo_on_click)
+        self.btn_show_included.clicked.connect(self.show_included_on_click)
+        self.btn_show_excluded.clicked.connect(self.show_excluded_on_click)
+        self.btn_show_remaining.clicked.connect(self.show_remaining_on_click)
 
         self.btn_export.setToolTip("Export tooltip")
         self.btn_import.setToolTip("Import tooltip")
@@ -114,6 +133,9 @@ class CellAnalyzer(QWidget):
         self.btn_export.setEnabled(False)
         self.btn_include.setEnabled(False)
         self.btn_exclude.setEnabled(False)
+        self.btn_show_included.setEnabled(False)
+        self.btn_show_excluded.setEnabled(False)
+        self.btn_show_remaining.setEnabled(False)
 
         # LineEdits
         self.lineedit_start_id = QLineEdit()
@@ -184,6 +206,10 @@ class CellAnalyzer(QWidget):
         content.layout().addWidget(self.lineedit_conversion_rate, 12, 1, 1, 1)
         content.layout().addWidget(self.combobox_conversion_unit, 12, 2, 1, 1)
 
+        content.layout().addWidget(self.btn_show_included, 13, 0, 1, 1)
+        content.layout().addWidget(self.btn_show_excluded, 13, 1, 1, 1)
+        content.layout().addWidget(self.btn_show_remaining, 13, 2, 1, 1)
+
         scroll_area = QScrollArea()
         scroll_area.setWidget(content)
         scroll_area.setWidgetResizable(True)
@@ -194,7 +220,12 @@ class CellAnalyzer(QWidget):
         # Hotkeys
 
         hotkeys = self.viewer.keymap.keys()
-        custom_binds = [("J", self.on_hotkey_include),("F", self.on_hotkey_exclude),("B", self.on_hotkey_undo),("V",self.toggle_visibility_label_layers)]
+        custom_binds = [
+            ("J", self.on_hotkey_include),
+            ("F", self.on_hotkey_exclude),
+            ("B", self.on_hotkey_undo),
+            ("V", self.toggle_visibility_label_layers_hotkey),
+        ]
         for custom_bind in custom_binds:
             if not custom_bind[0] in hotkeys:
                 viewer.bind_key(*custom_bind)
@@ -246,9 +277,7 @@ class CellAnalyzer(QWidget):
         self.label_mean_included.setText(
             f"{str(self.mean_size*factor)} {unit}"
         )
-        self.label_std_included.setText(
-            f"{str(self.std_size*factor)} {unit}"
-        )
+        self.label_std_included.setText(f"{str(self.std_size*factor)} {unit}")
         # self.label_metric.included.setText(new value)
 
     def start_analysis_on_click(self):
@@ -257,6 +286,9 @@ class CellAnalyzer(QWidget):
         self.btn_include.setEnabled(True)
         self.btn_import.setEnabled(False)
         self.btn_export.setEnabled(True)
+        self.btn_show_included.setEnabled(True)
+        self.btn_show_excluded.setEnabled(True)
+        self.btn_show_remaining.setEnabled(True)
         self.label_layer.opacity = 0.3
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.label_layer.data), name="Current Cell"
@@ -337,17 +369,22 @@ class CellAnalyzer(QWidget):
 
     def include_on_click(self):
         nonzero_accepted = np.transpose(np.nonzero(self.accepted_cells))
-        nonzero_current = np.transpose(np.nonzero(self.current_cell_layer))
+        nonzero_current = np.transpose(
+            np.nonzero(self.current_cell_layer.data)
+        )
         overlap = set(map(tuple, nonzero_accepted)).intersection(
             map(tuple, nonzero_current)
         )
         if overlap:
             overlap_indices = tuple(np.array(list(overlap)).T)
+            # self.current_cell_layer.data[overlap_indices] += 1
+            self.label_layer.opacity = 0.2
             self.current_cell_layer.opacity = 0.3
             overlap_layer = self.viewer.add_labels(
-                np.zeros_like(self.label_layer.data), name="Overlap"
+                np.zeros_like(self.label_layer.data), name="Overlap", opacity=1
             )
-            overlap_layer[overlap_indices] = self.remaining_ids[0] + 1
+            overlap_layer.data[overlap_indices] = self.remaining_ids[0] + 1
+            overlap_layer.refresh()
             msg = QMessageBox()
             msg.setWindowTitle("napari")
             msg.setText(
@@ -355,7 +392,8 @@ class CellAnalyzer(QWidget):
             )
             msg.exec()
             self.current_cell_layer.opacity = 0.7
-            self.viewer.remove(overlap_layer)
+            self.label_layer.opacity = 0.3
+            self.viewer.layers.remove(overlap_layer)
             return
 
         # print(self.accepted_cells.shape)
@@ -442,7 +480,53 @@ class CellAnalyzer(QWidget):
         self.update_labels()
         self.display_cell()
 
-    def toggle_visibility_label_layers(self, _):
+    def toggle_visibility_label_layers_hotkey(self, _):
+        self.toggle_visibility_label_layers()
+
+    def toggle_visibility_label_layers(self):
         for layer in self.viewer.layers:
             if isinstance(layer, Labels):
                 layer.visible = not layer.visible
+
+    def show_included_on_click(self):
+        if self.btn_show_included.text() == "Show Included":
+            self.btn_show_included.setText("Back")
+            self.toggle_visibility_label_layers()
+            self.included_layer = self.viewer.add_labels(
+                self.accepted_cells, name="Included Cells"
+            )
+        else:
+            self.viewer.layers.remove(self.included_layer)
+            self.toggle_visibility_label_layers()
+            self.btn_show_included.setText("Show Included")
+
+    def show_excluded_on_click(self):
+        if self.btn_show_excluded.text() == "Show Excluded":
+            self.btn_show_excluded.setText("Back")
+            self.toggle_visibility_label_layers()
+            data = self.label_layer.data
+            accepted = np.unique(self.accepted_cells[self.accepted_cells != 0])
+            mask = np.isin(data, np.append(accepted, self.remaining_ids))
+            data[mask] = 0
+            self.excluded_layer = self.viewer.add_labels(
+                data, name="Excluded Cells"
+            )
+        else:
+            self.viewer.layers.remove(self.excluded_layer)
+            self.toggle_visibility_label_layers()
+            self.btn_show_excluded.setText("Show Excluded")
+
+    def show_remaining_on_click(self):
+        if self.btn_show_remaining.text() == "Show Remaining":
+            self.btn_show_remaining.setText("Back")
+            self.toggle_visibility_label_layers()
+            data = self.label_layer.data
+            mask = ~np.isin(data, self.remaining_ids)
+            data[mask] = 0
+            self.remaining_layer = self.viewer.add_labels(
+                data, name="Remaining Cells"
+            )
+        else:
+            self.viewer.layers.remove(self.remaining_layer)
+            self.toggle_visibility_label_layers()
+            self.btn_show_remaining.setText("Show Remaining")
