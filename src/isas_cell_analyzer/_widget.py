@@ -39,7 +39,7 @@ class CellAnalyzer(QWidget):
             None  # label layer of all remaining cells
         )
         self.metric_data: List[
-            Tuple[int, int]
+            Tuple[int, int, Tuple(int, int)]
         ] = (
             []
         )  # list of tuples holding cell-id and metric data (adjust if more metrics need to be saved)
@@ -59,7 +59,7 @@ class CellAnalyzer(QWidget):
 
         # Labels
         title = QLabel("<h1>MMV-Cell_Analyzer</h1>")
-        label_start_id = QLabel("Start analysis at:")
+        self.label_start_id = QLabel("Start analysis at:")
         label_included = QLabel("Included:")
         label_excluded = QLabel("Excluded:")
         label_remaining = QLabel("Remaining:")
@@ -143,7 +143,7 @@ class CellAnalyzer(QWidget):
         ### GUI
         content = QWidget()
         content.setLayout(QGridLayout())
-        content.layout().addWidget(title, 0, 0)
+        content.layout().addWidget(title, 0, 0, 1, -1)
 
         content.layout().addWidget(spacer, 1, 0, 1, -1)
 
@@ -151,7 +151,7 @@ class CellAnalyzer(QWidget):
         content.layout().addWidget(self.btn_export, 2, 2, 1, 1)
 
         content.layout().addWidget(self.btn_start_analysis, 3, 0, 1, 1)
-        content.layout().addWidget(label_start_id, 3, 1, 1, 1)
+        content.layout().addWidget(self.label_start_id, 3, 1, 1, 1)
         content.layout().addWidget(self.lineedit_start_id, 3, 2, 1, 1)
 
         content.layout().addWidget(line1, 4, 0, 1, -1)
@@ -267,29 +267,82 @@ class CellAnalyzer(QWidget):
         self.btn_show_included.setEnabled(True)
         self.btn_show_excluded.setEnabled(True)
         self.btn_show_remaining.setEnabled(True)
+        self.label_start_id.setText("Next cell:")
         self.label_layer.opacity = 0.3
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.label_layer.data), name="Current Cell"
         )
+        start_id = int(self.lineedit_start_id.text())
+        if not start_id in self.remaining_ids:
+            lower_ids = [value for value in self.remaining_ids if value < start_id]
+            if len(lower_ids) > 0:
+                start_id = lower_ids[-1]
+            else:
+                start_id = self.remaining_ids[0]
+        self.lineedit_start_id.setText(str(start_id))
         # start iterating through ids to create label layer for and zoom into centroid of label
         self.display_cell()
 
     def display_cell(self):
         if len(self.remaining_ids) > 0:
+            next_id = int(self.lineedit_start_id.text())
+            original_length = len(self.remaining_ids)
+            if next_id > self.remaining_ids[0]:
+                if next_id not in self.remaining_ids:
+                    candidate_ids = [i for i in self.remaining_ids if i < next_id]
+                    if len(candidate_ids) > 0:
+                        next_id = candidate_ids[-1]
+                    else:
+                        next_id = self.remaining_ids[0]
+                self.remaining_ids = [i for i in self.remaining_ids if i >= next_id]
+                self.amount_remaining -len(self.remaining_ids)
+                amount_removed = original_length - len(self.remaining_ids)
+                self.amount_excluded += amount_removed
+            elif next_id < self.remaining_ids[0]:
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText(
+                    "Lowering the next cell id might not be a good idea."
+                )
+                msg.exec()
+                all_ids = np.unique(self.label_layer.data)
+                lower_ids = [i for i in all_ids if i < next_id]
+                accepted_ids = np.unique(self.accepted_cells)
+                not_accepted_ids = [i for i in all_ids if i not in accepted_ids]
+                next_id = max([lower_ids[-1]],min(not_accepted_ids))
+                original_length = len(self.remaining_ids)
+                self.remaining_ids = [i for i in all_ids if i not in accepted_ids and i >= next_id]
+                self.amount_remaining = len(self.remaining_ids)
+                amount_requeued = self.amount_remaining - original_length
+                print(f"amount requeued: {amount_requeued}")
+                self.amount_excluded -= amount_requeued
+                mask = np.isin(self.accepted_cells, self.remaining_ids)
+                self.accepted_cells[mask] = 0
+                self.metric_data = [(i, j, k) for i, j, k in self.metric_data if i not in self.remaining_ids]
+                print(f"next id: {next_id}")
+            print(self.remaining_ids)
+            self.lineedit_start_id.setText(str(next_id))
+            self.update_labels()
+            
             # display cell with id self.remaining_ids[0]
+            next_label = int(self.lineedit_start_id.text())
             self.current_cell_layer.data[:] = 0
-            indices = np.where(self.label_layer.data == self.remaining_ids[0])
-            self.current_cell_layer.data[indices] = self.remaining_ids[0]
+            indices = np.where(self.label_layer.data == next_label)
+            self.current_cell_layer.data[indices] = next_label
             self.current_cell_layer.refresh()
             centroid = ndimage.center_of_mass(
                 self.current_cell_layer.data,
                 labels=self.current_cell_layer.data,
-                index=self.remaining_ids[0],
+                index=next_label,
             )
             # centroid = tuple(int(value) for value in centroid)
             self.viewer.camera.center = centroid
-            self.viewer.camera.zoom = 2.0
-            self.current_cell_layer.selected_label = self.remaining_ids[0]
+            self.viewer.camera.zoom = 2.0  # !!
+            self.current_cell_layer.selected_label = next_label
+            if len(self.remaining_ids) > 1:
+                self.lineedit_start_id.setText(str(self.remaining_ids[1]))
+            else:
+                self.lineedit_start_id.setText("")
 
     def export_on_click(self):
         csv_filepath = Path(save_dialog(self))
@@ -378,9 +431,16 @@ class CellAnalyzer(QWidget):
         self.accepted_cells += self.current_cell_layer.data
         self.amount_included += 1
         current_id = self.remaining_ids.pop(0)
+        print(f"including {current_id}")
         self.amount_remaining = len(self.remaining_ids)
-        self.metric_data.append(
-            (current_id, np.count_nonzero(self.current_cell_layer.data))
+        centroid = ndimage.center_of_mass(self.current_cell_layer.data)
+        centroid = tuple(int(value) for value in centroid)
+        self.metric_data.append(  # TODO
+            (
+                current_id,
+                np.count_nonzero(self.current_cell_layer.data),
+                centroid,
+            )
         )
 
         self.calculate_metrics()
@@ -395,7 +455,7 @@ class CellAnalyzer(QWidget):
 
     def exclude_on_click(self):
         self.amount_excluded += 1
-        self.remaining_ids.pop(0)
+        print(f"excluding {self.remaining_ids.pop(0)}")
         self.amount_remaining = len(self.remaining_ids)
 
         self.update_labels()
