@@ -57,29 +57,8 @@ class CellAnalyzer(QWidget):
         # objects that can be updated are attributes of the class
         # for ease of access
 
-        # Logo
-        filename = "logo.png"
-        parent_directory = Path(__file__).resolve().parent
-        relative_path = Path("ressources") / filename
-        path = parent_directory / relative_path
-        image = cv2.imread(str(path))
-        resized_image = cv2.resize(image, None, fx=0.5, fy=0.5)
-        height, width, _ = resized_image.shape
-        logo_pixmap = QPixmap(
-            QImage(
-                resized_image.data,
-                width,
-                height,
-                3 * width,
-                QImage.Format_BGR888,
-            )
-        )
-
         # Labels
-        title = QLabel("ISAS Cell Analyzer")
-        logo = QLabel()
-        logo.setPixmap(logo_pixmap)
-        logo.setAlignment(Qt.AlignCenter)
+        title = QLabel("<h1>MMV-Cell_Analyzer</h1>")
         label_start_id = QLabel("Start analysis at:")
         label_included = QLabel("Included:")
         label_excluded = QLabel("Excluded:")
@@ -165,7 +144,6 @@ class CellAnalyzer(QWidget):
         content = QWidget()
         content.setLayout(QGridLayout())
         content.layout().addWidget(title, 0, 0)
-        content.layout().addWidget(logo, 0, 1, 1, -1)
 
         content.layout().addWidget(spacer, 1, 0, 1, -1)
 
