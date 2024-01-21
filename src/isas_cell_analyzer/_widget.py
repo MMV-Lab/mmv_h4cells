@@ -91,6 +91,7 @@ class CellAnalyzer(QWidget):
         self.btn_show_included = QPushButton("Show Included")
         self.btn_show_excluded = QPushButton("Show Excluded")
         self.btn_show_remaining = QPushButton("Show Remaining")
+        self.btn_segment = QPushButton("Draw own cell")
 
         self.btn_start_analysis.clicked.connect(self.start_analysis_on_click)
         self.btn_export.clicked.connect(self.export_on_click)
@@ -101,6 +102,7 @@ class CellAnalyzer(QWidget):
         self.btn_show_included.clicked.connect(self.show_included_on_click)
         self.btn_show_excluded.clicked.connect(self.show_excluded_on_click)
         self.btn_show_remaining.clicked.connect(self.show_remaining_on_click)
+        self.btn_segment.clicked.connect(self.draw_own_cell)
 
         self.btn_export.setToolTip("Export tooltip")
         self.btn_import.setToolTip("Import tooltip")
@@ -115,6 +117,7 @@ class CellAnalyzer(QWidget):
         self.btn_show_included.setEnabled(False)
         self.btn_show_excluded.setEnabled(False)
         self.btn_show_remaining.setEnabled(False)
+        self.btn_segment.setEnabled(False)
 
         # LineEdits
         self.lineedit_start_id = QLineEdit()
@@ -148,6 +151,7 @@ class CellAnalyzer(QWidget):
         content.layout().addWidget(spacer, 1, 0, 1, -1)
 
         content.layout().addWidget(self.btn_import, 2, 0, 1, 1)
+        content.layout().addWidget(self.btn_segment, 2, 1, 1, 1)
         content.layout().addWidget(self.btn_export, 2, 2, 1, 1)
 
         content.layout().addWidget(self.btn_start_analysis, 3, 0, 1, 1)
@@ -217,6 +221,21 @@ class CellAnalyzer(QWidget):
             if isinstance(layer, Labels):
                 self.set_label_layer(layer)
                 break
+    
+    def draw_own_cell(self):
+        if self.btn_segment.text() == "Draw own cell":
+            self.btn_segment.setText("Confirm")
+            # Display empty current cell layer
+            self.current_cell_layer.data[:] = 0
+            self.current_cell_layer.refresh()
+            # Select current cell layer, set mode to paint
+            self.viewer.layers.select(self.current_cell_layer)
+            self.current_cell_layer.mode = "paint"
+            # Select unique id
+            self.current_cell_layer.selected_label = max(max(self.accepted_cells),max(self.remaining_ids))+1
+        else:
+            if self.include_on_click() is None:
+                self.btn_segment.setText("Draw own cell")
 
     def get_label_layer(self, event):
         if not (self.label_layer is None and isinstance(event.value, Labels)):
@@ -267,6 +286,7 @@ class CellAnalyzer(QWidget):
         self.btn_show_included.setEnabled(True)
         self.btn_show_excluded.setEnabled(True)
         self.btn_show_remaining.setEnabled(True)
+        self.btn_segment.setEnabled(True)
         self.label_start_id.setText("Next cell:")
         self.label_layer.opacity = 0.3
         self.current_cell_layer = self.viewer.add_labels(
@@ -354,6 +374,7 @@ class CellAnalyzer(QWidget):
             if self.lineedit_conversion_rate.text() != ""
             else 1
         )
+        self.metric_data = sorted(self.metric_data, key=lambda x: x[0])
         write(
             csv_filepath,
             self.metric_data,
@@ -398,7 +419,7 @@ class CellAnalyzer(QWidget):
             # print("hotkey for include:", end=" ")
             self.include_on_click()
 
-    def include_on_click(self):
+    def include_on_click(self, self_drawn = False):
         nonzero_accepted = np.transpose(np.nonzero(self.accepted_cells))
         nonzero_current = np.transpose(
             np.nonzero(self.current_cell_layer.data)
@@ -425,12 +446,15 @@ class CellAnalyzer(QWidget):
             self.current_cell_layer.opacity = 0.7
             self.label_layer.opacity = 0.3
             self.viewer.layers.remove(overlap_layer)
-            return
+            return 0
 
         # print(self.accepted_cells.shape)
         self.accepted_cells += self.current_cell_layer.data
         self.amount_included += 1
-        current_id = self.remaining_ids.pop(0)
+        if not self_drawn:
+            current_id = self.remaining_ids.pop(0)
+        else:
+            current_id = max(self.current_cell_layer.data)
         print(f"including {current_id}")
         self.amount_remaining = len(self.remaining_ids)
         centroid = ndimage.center_of_mass(self.current_cell_layer.data)
