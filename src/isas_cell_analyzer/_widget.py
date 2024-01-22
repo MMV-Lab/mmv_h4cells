@@ -378,7 +378,7 @@ class CellAnalyzer(QWidget):
             )
             # centroid = tuple(int(value) for value in centroid)
             self.viewer.camera.center = centroid
-            self.viewer.camera.zoom = 2.0  # !!
+            self.viewer.camera.zoom = 7.5  # !!
             self.current_cell_layer.selected_label = next_label
             if len(self.remaining_ids) > 1:
                 self.lineedit_start_id.setText(str(self.remaining_ids[1]))
