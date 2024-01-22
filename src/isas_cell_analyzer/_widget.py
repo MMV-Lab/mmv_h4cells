@@ -453,21 +453,9 @@ class CellAnalyzer(QWidget):
         overlap = set(map(tuple, nonzero_current)).intersection(
             map(tuple, nonzero_other)
         )
-        # nonzero_accepted = np.transpose(np.nonzero(self.accepted_cells))
-        # filtered_original = np.copy(self.label_layer.data)
-        # filtered_original[filtered_original == np.max(nonzero_current)] = 0
-        # nonzero_original = np.transpose(np.nonzero(filtered_original))
-        # overlap = set(map(tuple, nonzero_current)).intersection(
-        #     set(map(tuple, nonzero_original)).union(
-        #         map(tuple, nonzero_accepted)
-        #     )
-        # )
-        # overlap = set(map(tuple, nonzero_accepted)).intersection(
-        #     map(tuple, nonzero_current)
-        # )
+
         if overlap:
             overlap_indices = tuple(np.array(list(overlap)).T)
-            # self.current_cell_layer.data[overlap_indices] += 1
             self.label_layer.opacity = 0.2
             self.current_cell_layer.opacity = 0.3
             overlap_layer = self.viewer.add_labels(
@@ -488,7 +476,6 @@ class CellAnalyzer(QWidget):
             self.viewer.layers.selection.select_only(self.current_cell_layer)
             return 0
 
-        # print(self.accepted_cells.shape)
         self.accepted_cells += self.current_cell_layer.data
         self.amount_included += 1
         if not self_drawn:
