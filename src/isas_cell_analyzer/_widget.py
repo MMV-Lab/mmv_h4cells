@@ -351,7 +351,6 @@ class CellAnalyzer(QWidget):
                 ]
                 self.amount_remaining = len(self.remaining_ids)
                 amount_requeued = self.amount_remaining - original_length
-                print(f"amount requeued: {amount_requeued}")
                 self.amount_excluded -= amount_requeued
                 mask = np.isin(self.accepted_cells, self.remaining_ids)
                 self.accepted_cells[mask] = 0
@@ -360,8 +359,6 @@ class CellAnalyzer(QWidget):
                     for i, j, k in self.metric_data
                     if i not in self.remaining_ids
                 ]
-                print(f"next id: {next_id}")
-            print(self.remaining_ids)
             self.lineedit_start_id.setText(str(next_id))
             self.update_labels()
 
@@ -437,14 +434,12 @@ class CellAnalyzer(QWidget):
 
     def on_hotkey_include(self, _):
         if self.btn_include.isEnabled():
-            # print("hotkey for include:", end=" ")
             self.include_on_click()
 
     def include_on_click(self, self_drawn=False):
         nonzero_current = np.transpose(
             np.nonzero(self.current_cell_layer.data)
         )
-        print(np.max(self.current_cell_layer.data))
         accepted_cells = np.copy(self.accepted_cells)
         combined_layer = accepted_cells + self.label_layer.data
         if not self_drawn:
@@ -484,7 +479,6 @@ class CellAnalyzer(QWidget):
             current_id = np.max(self.current_cell_layer.data)
             self.lineedit_start_id.setText(str(self.remaining_ids[0]))
         self.evaluated_ids.append(current_id)
-        print(f"including {current_id}")
         self.amount_remaining = len(self.remaining_ids)
         centroid = ndimage.center_of_mass(self.current_cell_layer.data)
         centroid = tuple(int(value) for value in centroid)
@@ -510,7 +504,6 @@ class CellAnalyzer(QWidget):
         self.amount_excluded += 1
         excluded_id = self.remaining_ids.pop(0)
         self.evaluated_ids.append(excluded_id)
-        print(f"excluding {excluded_id}")
         self.amount_remaining = len(self.remaining_ids)
 
         self.update_labels()
@@ -535,10 +528,8 @@ class CellAnalyzer(QWidget):
         if len(self.evaluated_ids) == 0:
             return
         last_evaluated = self.evaluated_ids.pop(-1)
-        print(f"undoing {last_evaluated}")
         if last_evaluated in np.unique(self.label_layer.data):
             self.remaining_ids.insert(0, last_evaluated)
-            print(f"requeueing {last_evaluated}")
         if last_evaluated in self.accepted_cells:
             self.amount_included -= 1
             self.metric_data.pop(-1)
