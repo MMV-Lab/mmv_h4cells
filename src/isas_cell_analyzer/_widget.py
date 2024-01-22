@@ -225,7 +225,7 @@ class CellAnalyzer(QWidget):
 
     def draw_own_cell(self):
         if self.btn_segment.text() == "Draw own cell":
-            self.btn_segment.setText("Confirm")
+            self.btn_segment.setText("Confirm/Back")
             # Display empty current cell layer
             self.current_cell_layer.data[:] = 0
             self.current_cell_layer.refresh()
@@ -437,6 +437,8 @@ class CellAnalyzer(QWidget):
             self.include_on_click()
 
     def include_on_click(self, self_drawn=False):
+        if np.max(self.current_cell_layer.data) == 0:
+            return
         nonzero_current = np.transpose(
             np.nonzero(self.current_cell_layer.data)
         )
