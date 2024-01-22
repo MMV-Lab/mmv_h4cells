@@ -222,7 +222,7 @@ class CellAnalyzer(QWidget):
             if isinstance(layer, Labels):
                 self.set_label_layer(layer)
                 break
-    
+
     def draw_own_cell(self):
         if self.btn_segment.text() == "Draw own cell":
             self.btn_segment.setText("Confirm")
@@ -234,7 +234,9 @@ class CellAnalyzer(QWidget):
             self.viewer.layers.selection.select_only(self.current_cell_layer)
             self.current_cell_layer.mode = "paint"
             # Select unique id
-            self.current_cell_layer.selected_label = max(np.max(self.accepted_cells),max(self.remaining_ids))+1
+            self.current_cell_layer.selected_label = (
+                max(np.max(self.accepted_cells), max(self.remaining_ids)) + 1
+            )
         else:
             if self.include_on_click(True) is None:
                 self.btn_segment.setText("Draw own cell")
@@ -297,7 +299,9 @@ class CellAnalyzer(QWidget):
         )
         start_id = int(self.lineedit_start_id.text())
         if not start_id in self.remaining_ids:
-            lower_ids = [value for value in self.remaining_ids if value < start_id]
+            lower_ids = [
+                value for value in self.remaining_ids if value < start_id
+            ]
             if len(lower_ids) > 0:
                 start_id = lower_ids[-1]
             else:
@@ -312,13 +316,17 @@ class CellAnalyzer(QWidget):
             original_length = len(self.remaining_ids)
             if next_id > self.remaining_ids[0]:
                 if next_id not in self.remaining_ids:
-                    candidate_ids = [i for i in self.remaining_ids if i < next_id]
+                    candidate_ids = [
+                        i for i in self.remaining_ids if i < next_id
+                    ]
                     if len(candidate_ids) > 0:
                         next_id = candidate_ids[-1]
                     else:
                         next_id = self.remaining_ids[0]
-                self.remaining_ids = [i for i in self.remaining_ids if i >= next_id]
-                self.amount_remaining -len(self.remaining_ids)
+                self.remaining_ids = [
+                    i for i in self.remaining_ids if i >= next_id
+                ]
+                self.amount_remaining - len(self.remaining_ids)
                 amount_removed = original_length - len(self.remaining_ids)
                 self.amount_excluded += amount_removed
             elif next_id < self.remaining_ids[0]:
@@ -331,22 +339,32 @@ class CellAnalyzer(QWidget):
                 all_ids = np.unique(self.label_layer.data)
                 lower_ids = [i for i in all_ids if i < next_id]
                 accepted_ids = np.unique(self.accepted_cells)
-                not_accepted_ids = [i for i in all_ids if i not in accepted_ids]
-                next_id = max([lower_ids[-1]],min(not_accepted_ids))
+                not_accepted_ids = [
+                    i for i in all_ids if i not in accepted_ids
+                ]
+                next_id = max([lower_ids[-1]], min(not_accepted_ids))
                 original_length = len(self.remaining_ids)
-                self.remaining_ids = [i for i in all_ids if i not in accepted_ids and i >= next_id]
+                self.remaining_ids = [
+                    i
+                    for i in all_ids
+                    if i not in accepted_ids and i >= next_id
+                ]
                 self.amount_remaining = len(self.remaining_ids)
                 amount_requeued = self.amount_remaining - original_length
                 print(f"amount requeued: {amount_requeued}")
                 self.amount_excluded -= amount_requeued
                 mask = np.isin(self.accepted_cells, self.remaining_ids)
                 self.accepted_cells[mask] = 0
-                self.metric_data = [(i, j, k) for i, j, k in self.metric_data if i not in self.remaining_ids]
+                self.metric_data = [
+                    (i, j, k)
+                    for i, j, k in self.metric_data
+                    if i not in self.remaining_ids
+                ]
                 print(f"next id: {next_id}")
             print(self.remaining_ids)
             self.lineedit_start_id.setText(str(next_id))
             self.update_labels()
-            
+
             # display cell with id self.remaining_ids[0]
             next_label = int(self.lineedit_start_id.text())
             self.current_cell_layer.data[:] = 0
@@ -422,14 +440,31 @@ class CellAnalyzer(QWidget):
             # print("hotkey for include:", end=" ")
             self.include_on_click()
 
-    def include_on_click(self, self_drawn = False):
-        nonzero_accepted = np.transpose(np.nonzero(self.accepted_cells))
+    def include_on_click(self, self_drawn=False):
         nonzero_current = np.transpose(
             np.nonzero(self.current_cell_layer.data)
         )
-        overlap = set(map(tuple, nonzero_accepted)).intersection(
-            map(tuple, nonzero_current)
+        print(np.max(self.current_cell_layer.data))
+        accepted_cells = np.copy(self.accepted_cells)
+        combined_layer = accepted_cells + self.label_layer.data
+        if not self_drawn:
+            combined_layer[combined_layer == np.max(self.current_cell_layer.data)] = 0
+        nonzero_other = np.transpose(np.nonzero(combined_layer))
+        overlap = set(map(tuple, nonzero_current)).intersection(
+            map(tuple, nonzero_other)
         )
+        # nonzero_accepted = np.transpose(np.nonzero(self.accepted_cells))
+        # filtered_original = np.copy(self.label_layer.data)
+        # filtered_original[filtered_original == np.max(nonzero_current)] = 0
+        # nonzero_original = np.transpose(np.nonzero(filtered_original))
+        # overlap = set(map(tuple, nonzero_current)).intersection(
+        #     set(map(tuple, nonzero_original)).union(
+        #         map(tuple, nonzero_accepted)
+        #     )
+        # )
+        # overlap = set(map(tuple, nonzero_accepted)).intersection(
+        #     map(tuple, nonzero_current)
+        # )
         if overlap:
             overlap_indices = tuple(np.array(list(overlap)).T)
             # self.current_cell_layer.data[overlap_indices] += 1
@@ -449,6 +484,8 @@ class CellAnalyzer(QWidget):
             self.current_cell_layer.opacity = 0.7
             self.label_layer.opacity = 0.3
             self.viewer.layers.remove(overlap_layer)
+            self.viewer.layers.select_all()
+            self.viewer.layers.selection.select_only(self.current_cell_layer)
             return 0
 
         # print(self.accepted_cells.shape)
@@ -523,43 +560,6 @@ class CellAnalyzer(QWidget):
         else:
             self.amount_excluded -= 1
         self.lineedit_start_id.setText(str(self.remaining_ids[0]))
-
-        # if len(self.metric_data) > 0:
-        #     last_included, _, _ = self.metric_data[-1]
-        # else:
-        #     last_included = -1
-        # unique_ids = np.unique(self.label_layer.data)
-        # excluded_ids = [
-        #     cell_id
-        #     for cell_id in unique_ids
-        #     if cell_id not in self.remaining_ids
-        #     and not any(cell_id == x[0] for x in self.metric_data)
-        #     and cell_id > 0
-        # ]
-        # if len(excluded_ids) > 0:
-        #     max_excluded = excluded_ids[-1]
-        # else:
-        #     max_excluded = -1
-
-        # id_to_undo = max(max_excluded, last_included)
-        # print(f"{last_included} vs {max_excluded}")
-        # print(f"id to undo: {id_to_undo}")
-        # if id_to_undo == -1:
-        #     return
-
-        # if last_included > max_excluded:
-        #     print("undoing include")
-        #     if len(self.metric_data):
-        #         self.metric_data.pop(-1)
-        #         indices = np.where(self.accepted_cells == id_to_undo)
-        #         self.accepted_cells[indices] = 0
-        #         if id_to_undo in self.label_layer.data:
-        #             self.remaining_ids.insert(0, id_to_undo)
-        #         self.amount_included -= 1
-        # else:
-        #     print("undoing exclude")
-        #     self.remaining_ids.insert(0, id_to_undo)
-        #     self.amount_excluded -= 1
 
         self.amount_remaining = len(self.remaining_ids)
         self.calculate_metrics()
