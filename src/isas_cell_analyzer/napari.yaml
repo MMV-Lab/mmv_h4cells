@@ -1,9 +1,9 @@
 name: ISAS-Cell-Analyzer
 display_name: Cell Analyzer
 # use 'hidden' to remove plugin from napari hub search results
-visibility: public
+# visibility: public
 # see https://napari.org/stable/plugins/manifest.html for valid categories
-categories: ["Annotation", "Segmentation", "Acquisition"]
+# categories: ["Annotation", "Segmentation", "Acquisition"]
 contributions:
   commands:
     - id: ISAS-Cell-Analyzer.get_reader
