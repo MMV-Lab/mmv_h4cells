@@ -52,12 +52,12 @@ def get_writer(path):
 
 
 def write_csv(
-    path: str, data: List[Tuple[int, int]], metrics: Tuple[float, float], pixelsize: Tuple[float, str]
+    path: str, data: List[Tuple[int, int, Tuple[int, int]]], metrics: Tuple[float, float], pixelsize: Tuple[float, str]
 ):  # adjust if Metrics are added
     with open(path, "w", newline="") as file:
         csv_writer = csv.writer(file)
 
-        csv_writer.writerow(["ID", "Size"]) #, "metric name"
+        csv_writer.writerow(["ID", "Size [px]", "Centroid"]) #, "metric name"
         for row in data:
             csv_writer.writerow(row)
 
@@ -70,4 +70,4 @@ def write_csv(
 
 
 def write_tiff(path: str, data: np.ndarray):
-    OmeTiffWriter.save(data, path, dim_order_out="YX")
+    OmeTiffWriter.save(data, path, dim_order_out="YX") # breaks on linux

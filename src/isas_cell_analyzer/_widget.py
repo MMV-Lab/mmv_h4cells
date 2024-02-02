@@ -1,3 +1,4 @@
+import copy
 from qtpy.QtWidgets import (
     QLabel,
     QGridLayout,
@@ -88,7 +89,7 @@ class CellAnalyzer(QWidget):
         self.btn_import = QPushButton("Import")
         self.btn_include = QPushButton("Include")
         self.btn_exclude = QPushButton("Exclude")
-        btn_undo = QPushButton("Undo")
+        self.btn_undo = QPushButton("Undo")
         self.btn_show_included = QPushButton("Show Included")
         self.btn_show_excluded = QPushButton("Show Excluded")
         self.btn_show_remaining = QPushButton("Show Remaining")
@@ -99,7 +100,7 @@ class CellAnalyzer(QWidget):
         self.btn_import.clicked.connect(self.import_on_click)
         self.btn_include.clicked.connect(self.include_on_click)
         self.btn_exclude.clicked.connect(self.exclude_on_click)
-        btn_undo.clicked.connect(self.undo_on_click)
+        self.btn_undo.clicked.connect(self.undo_on_click)
         self.btn_show_included.clicked.connect(self.show_included_on_click)
         self.btn_show_excluded.clicked.connect(self.show_excluded_on_click)
         self.btn_show_remaining.clicked.connect(self.show_remaining_on_click)
@@ -109,12 +110,13 @@ class CellAnalyzer(QWidget):
         self.btn_import.setToolTip("Import tooltip")
         self.btn_include.setToolTip("J")
         self.btn_exclude.setToolTip("F")
-        btn_undo.setToolTip("B")
+        self.btn_undo.setToolTip("B")
 
         self.btn_start_analysis.setEnabled(False)
         self.btn_export.setEnabled(False)
         self.btn_include.setEnabled(False)
         self.btn_exclude.setEnabled(False)
+        self.btn_undo.setEnabled(False)
         self.btn_show_included.setEnabled(False)
         self.btn_show_excluded.setEnabled(False)
         self.btn_show_remaining.setEnabled(False)
@@ -162,7 +164,7 @@ class CellAnalyzer(QWidget):
         content.layout().addWidget(line1, 4, 0, 1, -1)
 
         content.layout().addWidget(self.btn_exclude, 5, 0, 1, 1)
-        content.layout().addWidget(btn_undo, 5, 1, 1, 1)
+        content.layout().addWidget(self.btn_undo, 5, 1, 1, 1)
         content.layout().addWidget(self.btn_include, 5, 2, 1, 1)
 
         content.layout().addWidget(label_included, 6, 0, 1, 1)
@@ -289,6 +291,7 @@ class CellAnalyzer(QWidget):
         self.btn_import.setEnabled(False)
         self.btn_export.setEnabled(True)
         self.btn_show_included.setEnabled(True)
+        self.btn_undo.setEnabled(True)
         self.btn_show_excluded.setEnabled(True)
         self.btn_show_remaining.setEnabled(True)
         self.btn_segment.setEnabled(True)
@@ -367,6 +370,7 @@ class CellAnalyzer(QWidget):
             self.current_cell_layer.data[:] = 0
             indices = np.where(self.label_layer.data == next_label)
             self.current_cell_layer.data[indices] = next_label
+            self.current_cell_layer.opacity = 0.7
             self.current_cell_layer.refresh()
             centroid = ndimage.center_of_mass(
                 self.current_cell_layer.data,
@@ -437,8 +441,6 @@ class CellAnalyzer(QWidget):
             self.include_on_click()
 
     def include_on_click(self, self_drawn=False):
-        if np.max(self.current_cell_layer.data) == 0:
-            return
         nonzero_current = np.transpose(
             np.nonzero(self.current_cell_layer.data)
         )
@@ -474,23 +476,25 @@ class CellAnalyzer(QWidget):
             return 0
 
         self.accepted_cells += self.current_cell_layer.data
-        self.amount_included += 1
         if not self_drawn:
             current_id = self.remaining_ids.pop(0)
         else:
             current_id = np.max(self.current_cell_layer.data)
             self.lineedit_start_id.setText(str(self.remaining_ids[0]))
-        self.evaluated_ids.append(current_id)
-        self.amount_remaining = len(self.remaining_ids)
-        centroid = ndimage.center_of_mass(self.current_cell_layer.data)
-        centroid = tuple(int(value) for value in centroid)
-        self.metric_data.append(  # TODO
-            (
-                current_id,
-                np.count_nonzero(self.current_cell_layer.data),
-                centroid,
+        
+        if np.max(self.current_cell_layer.data) != 0:
+            self.amount_included += 1
+            self.evaluated_ids.append(current_id)
+            centroid = ndimage.center_of_mass(self.current_cell_layer.data)
+            centroid = tuple(int(value) for value in centroid)
+            self.metric_data.append(  # TODO
+                (
+                    current_id,
+                    np.count_nonzero(self.current_cell_layer.data),
+                    centroid,
+                )
             )
-        )
+        self.amount_remaining = len(self.remaining_ids)
 
         self.calculate_metrics()
         self.update_labels()
@@ -570,7 +574,7 @@ class CellAnalyzer(QWidget):
         if self.btn_show_excluded.text() == "Show Excluded":
             self.btn_show_excluded.setText("Back")
             self.toggle_visibility_label_layers()
-            data = self.label_layer.data
+            data = copy.deepcopy(self.label_layer.data)
             accepted = np.unique(self.accepted_cells[self.accepted_cells != 0])
             mask = np.isin(data, np.append(accepted, self.remaining_ids))
             data[mask] = 0
@@ -586,7 +590,7 @@ class CellAnalyzer(QWidget):
         if self.btn_show_remaining.text() == "Show Remaining":
             self.btn_show_remaining.setText("Back")
             self.toggle_visibility_label_layers()
-            data = self.label_layer.data
+            data = copy.deepcopy(self.label_layer.data)
             mask = ~np.isin(data, self.remaining_ids)
             data[mask] = 0
             self.remaining_layer = self.viewer.add_labels(
