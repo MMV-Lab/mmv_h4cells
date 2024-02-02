@@ -18,8 +18,8 @@ import napari
 import numpy as np
 from typing import List, Tuple
 from pathlib import Path
-from isas_cell_analyzer._reader import open_dialog, read
-from isas_cell_analyzer._writer import save_dialog, write
+from mmv_cell_analyzer._reader import open_dialog, read
+from mmv_cell_analyzer._writer import save_dialog, write
 from napari.layers.labels.labels import Labels
 from scipy import ndimage
 

@@ -1,11 +1,11 @@
-# ISAS-Cell-Analyzer
+# mmv_Cell-Analyzer
 
-[![License BSD-3](https://img.shields.io/pypi/l/ISAS-Cell-Analyzer.svg?color=green)](https://github.com/MMV-Lab/ISAS-Cell-Analyzer/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/ISAS-Cell-Analyzer.svg?color=green)](https://pypi.org/project/ISAS-Cell-Analyzer)
-[![Python Version](https://img.shields.io/pypi/pyversions/ISAS-Cell-Analyzer.svg?color=green)](https://python.org)
-[![tests](https://github.com/MMV-Lab/ISAS-Cell-Analyzer/workflows/tests/badge.svg)](https://github.com/MMV-Lab/ISAS-Cell-Analyzer/actions)
-[![codecov](https://codecov.io/gh/MMV-Lab/ISAS-Cell-Analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/ISAS-Cell-Analyzer)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/ISAS-Cell-Analyzer)](https://napari-hub.org/plugins/ISAS-Cell-Analyzer)
+[![License BSD-3](https://img.shields.io/pypi/l/mmv_Cell-Analyzer.svg?color=green)](https://github.com/MMV-Lab/mmv_Cell-Analyzer/raw/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/mmv_Cell-Analyzer.svg?color=green)](https://pypi.org/project/mmv_Cell-Analyzer)
+[![Python Version](https://img.shields.io/pypi/pyversions/mmv_Cell-Analyzer.svg?color=green)](https://python.org)
+[![tests](https://github.com/MMV-Lab/mmv_Cell-Analyzer/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_Cell-Analyzer/actions)
+[![codecov](https://codecov.io/gh/MMV-Lab/mmv_Cell-Analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_Cell-Analyzer)
+[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_Cell-Analyzer)](https://napari-hub.org/plugins/mmv_Cell-Analyzer)
 
 A simple plugin to help with analyzing cells in napari
 
@@ -23,15 +23,15 @@ https://napari.org/stable/plugins/index.html
 
 ## Installation
 
-You can install `ISAS-Cell-Analyzer` via [pip]:
+You can install `mmv_Cell-Analyzer` via [pip]:
 
-    pip install ISAS-Cell-Analyzer
+    pip install mmv_Cell-Analyzer
 
 
 
 To install latest development version :
 
-    pip install git+https://github.com/MMV-Lab/ISAS-Cell-Analyzer.git
+    pip install git+https://github.com/MMV-Lab/mmv_Cell-Analyzer.git
 
 
 ## Contributing
@@ -42,7 +42,7 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"ISAS-Cell-Analyzer" is free and open source software
+"mmv_Cell-Analyzer" is free and open source software
 
 ## Issues
 
@@ -59,7 +59,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
 [cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
 
-[file an issue]: https://github.com/MMV-Lab/ISAS-Cell-Analyzer/issues
+[file an issue]: https://github.com/MMV-Lab/mmv_Cell-Analyzer/issues
 
 [napari]: https://github.com/napari/napari
 [tox]: https://tox.readthedocs.io/en/latest/
