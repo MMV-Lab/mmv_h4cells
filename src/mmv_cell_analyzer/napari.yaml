@@ -1,4 +1,4 @@
-name: ISAS-Cell-Analyzer
+name: mmv_cell_analyzer
 display_name: Cell Analyzer
 # use 'hidden' to remove plugin from napari hub search results
 # visibility: public
@@ -6,29 +6,29 @@ display_name: Cell Analyzer
 # categories: ["Annotation", "Segmentation", "Acquisition"]
 contributions:
   commands:
-    - id: ISAS-Cell-Analyzer.get_reader
-      python_name: isas_cell_analyzer._reader:napari_get_reader
+    - id: mmv_Cell-Analyzer.get_reader
+      python_name: mmv_cell_analyzer._reader:napari_get_reader
       title: Open data with Cell Analyzer
-    - id: ISAS-Cell-Analyzer.write_multiple
-      python_name: isas_cell_analyzer._writer:write_multiple
+    - id: mmv_Cell-Analyzer.write_multiple
+      python_name: mmv_cell_analyzer._writer:write_multiple
       title: Save multi-layer data with Cell Analyzer
-    - id: ISAS-Cell-Analyzer.write_single_image
-      python_name: isas_cell_analyzer._writer:write_single_image
+    - id: mmv_Cell-Analyzer.write_single_image
+      python_name: mmv_cell_analyzer._writer:write_single_image
       title: Save image data with Cell Analyzer
-    - id: ISAS-Cell-Analyzer.make_qwidget
-      python_name: isas_cell_analyzer:CellAnalyzer
+    - id: mmv_Cell-Analyzer.make_qwidget
+      python_name: mmv_cell_analyzer:CellAnalyzer
       title: Make Cell Analyzer
   readers:
-    - command: ISAS-Cell-Analyzer.get_reader
+    - command: mmv_Cell-Analyzer.get_reader
       accepts_directories: false
       filename_patterns: ['*.npy']
   writers:
-    - command: ISAS-Cell-Analyzer.write_multiple
+    - command: mmv_Cell-Analyzer.write_multiple
       layer_types: ['image*','labels*']
       filename_extensions: []
-    - command: ISAS-Cell-Analyzer.write_single_image
+    - command: mmv_Cell-Analyzer.write_single_image
       layer_types: ['image']
       filename_extensions: ['.npy']
   widgets:
-    - command: ISAS-Cell-Analyzer.make_qwidget
+    - command: mmv_Cell-Analyzer.make_qwidget
       display_name: Cell Analyzer

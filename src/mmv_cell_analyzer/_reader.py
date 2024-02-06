@@ -49,10 +49,10 @@ def napari_get_reader(path):
         same path or list of paths, and returns a list of layer data tuples.
     """
 
-    if path.suffix == ".csv":
+    if path.endswith(".csv"):
         return read_csv
 
-    if path.suffix == ".tiff":
+    if path.endswith(".tiff"):
         return read_tiff
 
     return None

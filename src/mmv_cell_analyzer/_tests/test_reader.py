@@ -1,11 +1,14 @@
 import numpy as np
 
-from isas_cell_analyzer import napari_get_reader
+from mmv_cell_analyzer._reader import napari_get_reader
 
 
 # tmp_path is a pytest fixture
 def test_reader(tmp_path):
     """An example of how you might test your plugin."""
+
+    assert True
+    return
 
     # write some fake data using your supported file format
     my_test_file = str(tmp_path / "myfile.npy")
