@@ -1,7 +1,7 @@
 from qtpy.QtWidgets import QFileDialog
 import csv
 from aicsimageio import AICSImage
-import tifffile
+import json
 
 
 def open_dialog(parent, filetype="*.csv", directory=""):
@@ -49,10 +49,12 @@ def napari_get_reader(path):
         same path or list of paths, and returns a list of layer data tuples.
     """
 
-    if path.endswith(".csv"):
+    # if path.endswith(".csv"):
+    if path.suffix == ".csv":
         return read_csv
 
-    if path.endswith(".tiff"):
+    # if path.endswith(".tiff")
+    if path.suffix == ".tiff" or path.suffix == ".tif":
         return read_tiff
 
     return None
@@ -75,6 +77,7 @@ def read_csv(path):  # adjust if needed if metrics are added
     )  # List to store tuples of rows with the first element as an integer
     metrics = ()  # Tuple to store the metrics if its first element is a float
     pixelsize = ()
+    excluded = []
 
     with open(path, "r") as file:
         csv_reader = csv.reader(file)
@@ -90,7 +93,12 @@ def read_csv(path):  # adjust if needed if metrics are added
                 except ValueError:
                     pass
             # Skip empty rows
-            if len(row) == 0 or isinstance(row[0], str):
+            if len(row) == 0:
+                continue
+
+            if isinstance(row[0], str):
+                if row[0].startswith("ID"):
+                    excluded = json.loads(row[4])
                 continue
 
             # Check the type of the first element in the row
@@ -106,7 +114,7 @@ def read_csv(path):  # adjust if needed if metrics are added
         # If the metric values happen to all be integers, they are now the last row of the data
         metrics = data.pop(-1)
 
-    return data, metrics, pixelsize
+    return data, metrics, pixelsize, excluded
 
 
 def read_tiff(path):
