@@ -507,7 +507,9 @@ class CellAnalyzer(QWidget):
         )
         accepted_cells = np.copy(self.accepted_cells)
         combined_layer = accepted_cells + self.label_layer.data
-        combined_layer[combined_layer == np.max(self.current_cell_layer.data)] = 0
+        combined_layer[
+            combined_layer == np.max(self.current_cell_layer.data)
+        ] = 0
         nonzero_other = np.transpose(np.nonzero(combined_layer))
         overlap = set(map(tuple, nonzero_current)).intersection(
             map(tuple, nonzero_other)
@@ -670,6 +672,7 @@ class CellAnalyzer(QWidget):
             msg.setText("Please enter a comma separated list of integers.")
             msg.exec()
             return
+        processed_ids = [id for id in included_ids if id in self.remaining_ids]
         for id in included_ids:
             if id in self.remaining_ids:
                 self.display_cell(id)
@@ -678,3 +681,16 @@ class CellAnalyzer(QWidget):
         self.lineedit_include.setText("")
         self.lineedit_start_id.setText(str(self.remaining_ids[0]))
         self.display_next_cell()
+        msg = QMessageBox()
+        msg.setWindowTitle("napari")
+        if len(processed_ids) == len(included_ids):
+            msg.setText(f"Cells included: {processed_ids}")
+        elif len(processed_ids) == 0:
+            msg.setText(
+                f"No new cells included.\nAll specified cells already included or excluded.\nOnly unprocessed cells can be included."
+            )
+        else:
+            msg.setText(
+                f"Cells included: {processed_ids}\nCells not included: {list(set(included_ids) - set(processed_ids))}"
+            )
+        msg.exec()
