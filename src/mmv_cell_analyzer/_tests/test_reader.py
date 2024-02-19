@@ -1,34 +1,36 @@
 import numpy as np
 
+from pathlib import Path
+import csv
+from aicsimageio.writers import OmeTiffWriter
 from mmv_cell_analyzer._reader import napari_get_reader
 
 
 # tmp_path is a pytest fixture
-def test_reader(tmp_path):
+def test_reader_csv(tmp_path):
     """An example of how you might test your plugin."""
 
-    assert True
-    return
-
     # write some fake data using your supported file format
-    my_test_file = str(tmp_path / "myfile.npy")
-    original_data = np.random.rand(20, 20)
-    np.save(my_test_file, original_data)
-
+    my_test_file = Path(tmp_path / "myfile.csv")
+    with open(my_test_file, "w", newline="") as file:
+        csv_writer = csv.writer(file)
+        
+        csv_writer.writerow(["ID", "Size [px]", "Centroid", ""])
+        
     # try to read it back in
     reader = napari_get_reader(my_test_file)
     assert callable(reader)
-
-    # make sure we're delivering the right format
-    layer_data_list = reader(my_test_file)
-    assert isinstance(layer_data_list, list) and len(layer_data_list) > 0
-    layer_data_tuple = layer_data_list[0]
-    assert isinstance(layer_data_tuple, tuple) and len(layer_data_tuple) > 0
-
-    # make sure it's the same as it started
-    np.testing.assert_allclose(original_data, layer_data_tuple[0])
+    
+def test_reader_tiff(tmp_path):
+    my_test_file = Path(tmp_path / "myfile.tiff")
+    data = np.random.rand(10,10)
+    OmeTiffWriter.save(data, my_test_file, dim_order_out="YX")
+    
+    reader = napari_get_reader(my_test_file)
+    assert callable(reader)
 
 
 def test_get_reader_pass():
-    reader = napari_get_reader("fake.file")
+    no_file = Path("fake.file")
+    reader = napari_get_reader(no_file)
     assert reader is None
