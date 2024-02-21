@@ -36,7 +36,7 @@ To install latest development version :
 
 ## Documentation
 
-This plugin was developed for semi-automatic cell analysis.
+This plugin was developed for semi-automatic cell analysis to determine cell sizes of individual cells.
 
 The core functionality includes the option to include or exclude individual (cell) instances in the evaluation via the include/exclude button. After a decision has been made, the plugin automatically centers on the next instance and a new decision can be made.
 
@@ -48,9 +48,11 @@ If you have only interrupted the evaluation and exported the previous results, y
 
 ### Analysis
 
-The analysis can be started by clicking on the "Start analysis" button. The next instance ID to be evaluated is shown next to "Start analysis at". To change the region of interest to be evaluated, a different ID can be entered there and the plugin will center on this within the next 2 decisions. Decisions are made by clicking the Include/Exclude button. If an instance is not completely recognized correctly, you can use the paint function of napari to correct this manually and then include the instance as usual using the button. The undo function can be used to undo the last decision and the "Draw own cell" button allows you to add unrecognized cells manually. This must be done cell by cell and confirmed each time using the button. The plugin does not allow other existing instances to be painted over. If this happens by mistake, a notification is displayed and users must correct this manually.
+The analysis can be started by clicking on the "Start analysis" button. The next instance ID to be evaluated is shown next to "Start analysis at". To change the region of interest to be evaluated, a different ID can be entered there and the plugin will center on this within the next 2 decisions. Decisions are made by clicking the Include/Exclude button. If an instance is not completely recognized correctly, you can use the paint function of napari to correct this manually and then include the instance as usual using the button. The undo function can be used to undo the last decision and the "Draw own cell" button allows you to add unrecognized cells manually. This must be done cell by cell and confirmed each time using the button. The plugin does not allow other existing instances to be painted over. If this happens by mistake, a warning is displayed, oberlapping pixels are highlighted and users can either cancel via the cancel button within the warning or close the warning and correct this manually. 
 
 When an instance is included, the respective instance is written to a segmentation layer, which can be exported using the export function. In addition, the ID, the size and the centroid are exported as a .csv file. For a better overview, the included/excluded/remaining instances can be viewed using the buttons at the bottom. For more information, see the "Don'ts" section. Additionally, the microscopic resolution can be specified as an option.
+
+We also support the option of including several cells at once. To do so, the respective IDs must be entered at the bottom next to "Include" and then selected using the "Select multiple". This works by entering comma-separated IDs, so *1,5,100,17* would be a valid entry.
 
 ### Hotkeys
 
