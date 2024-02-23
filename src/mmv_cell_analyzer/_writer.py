@@ -3,6 +3,7 @@ import csv
 from typing import List, Tuple
 from aicsimageio.writers import OmeTiffWriter
 from qtpy.QtWidgets import QFileDialog
+import json
 
 
 def save_dialog(parent, filetype="*.csv", directory=""):
@@ -52,12 +53,12 @@ def get_writer(path):
 
 
 def write_csv(
-    path: str, data: List[Tuple[int, int, Tuple[int, int]]], metrics: Tuple[float, float], pixelsize: Tuple[float, str]
+    path: str, data: List[Tuple[int, int, Tuple[int, int]]], metrics: Tuple[float, float], pixelsize: Tuple[float, str], excluded: List[int]
 ):  # adjust if Metrics are added
     with open(path, "w", newline="") as file:
         csv_writer = csv.writer(file)
 
-        csv_writer.writerow(["ID", "Size [px]", "Centroid"]) #, "metric name"
+        csv_writer.writerow(["ID", "Size [px]", "Centroid", ""] + [json.dumps(excluded)]) #, "metric name"
         for row in data:
             csv_writer.writerow(row)
 
@@ -70,4 +71,5 @@ def write_csv(
 
 
 def write_tiff(path: str, data: np.ndarray):
-    OmeTiffWriter.save(data, path, dim_order_out="YX") # breaks on linux
+    data = data.astype(np.uint16)
+    OmeTiffWriter.save(data, path, dim_order_out="YX")

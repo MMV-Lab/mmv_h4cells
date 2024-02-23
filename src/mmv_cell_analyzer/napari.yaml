@@ -1,4 +1,4 @@
-name: mmv_cell_analyzer
+name: mmv_Cell-Analyzer
 display_name: Cell Analyzer
 # use 'hidden' to remove plugin from napari hub search results
 # visibility: public
