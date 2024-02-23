@@ -226,10 +226,6 @@ class CellAnalyzer(QWidget):
         for custom_bind in custom_binds:
             if not custom_bind[0] in hotkeys:
                 viewer.bind_key(*custom_bind)
-        # viewer.bind_key("j", self.on_hotkey_include)
-        # viewer.bind_key("f", self.on_hotkey_exclude)
-        # viewer.bind_key("b", self.on_hotkey_undo)
-        # viewer.bind_key("v", self.toggle_visibility_label_layers)
 
         self.viewer.layers.events.inserted.connect(self.get_label_layer)
         for layer in self.viewer.layers:
@@ -318,78 +314,69 @@ class CellAnalyzer(QWidget):
         )
         start_id = int(self.lineedit_start_id.text())
         if not start_id in self.remaining_ids:
+            print("Start id not in remaining ids")
             lower_ids = [
                 value for value in self.remaining_ids if value < start_id
             ]
             if len(lower_ids) > 0:
+                print("Using lower id")
                 start_id = lower_ids[-1]
             else:
+                print("Using remaining id")
                 start_id = self.remaining_ids[0]
         self.lineedit_start_id.setText(str(start_id))
         # start iterating through ids to create label layer for and zoom into centroid of label
         self.display_next_cell()
 
     def display_next_cell(self):
-        if len(self.remaining_ids) > 0:
-            next_id = int(self.lineedit_start_id.text())
-            original_length = len(self.remaining_ids)
-            if next_id > self.remaining_ids[0]:
-                if next_id not in self.remaining_ids:
-                    candidate_ids = [
-                        i for i in self.remaining_ids if i < next_id
-                    ]
-                    if len(candidate_ids) > 0:
-                        next_id = candidate_ids[-1]
-                    else:
-                        next_id = self.remaining_ids[0]
-                self.remaining_ids = [
-                    i for i in self.remaining_ids if i >= next_id
-                ]
-                self.amount_remaining - len(self.remaining_ids)
-                amount_removed = original_length - len(self.remaining_ids)
-                self.amount_excluded += amount_removed
-            elif next_id < self.remaining_ids[0]:
-                msg = QMessageBox()
-                msg.setWindowTitle("napari")
-                msg.setText(
-                    "Lowering the next cell id might not be a good idea."
-                )
-                msg.exec()
-                all_ids = np.unique(self.label_layer.data)
-                lower_ids = [i for i in all_ids if i < next_id]
-                accepted_ids = np.unique(self.accepted_cells)
-                not_accepted_ids = [
-                    i for i in all_ids if i not in accepted_ids
-                ]
-                next_id = max([lower_ids[-1]], min(not_accepted_ids))
-                original_length = len(self.remaining_ids)
-                self.remaining_ids = [
-                    i
-                    for i in all_ids
-                    if i not in accepted_ids and i >= next_id
-                ]
-                self.amount_remaining = len(self.remaining_ids)
-                amount_requeued = self.amount_remaining - original_length
-                self.amount_excluded -= amount_requeued
-                mask = np.isin(self.accepted_cells, self.remaining_ids)
-                self.accepted_cells[mask] = 0
-                self.metric_data = [
-                    (i, j, k)
-                    for i, j, k in self.metric_data
-                    if i not in self.remaining_ids
-                ]
-            self.lineedit_start_id.setText(str(next_id))
-            self.update_labels()
+        if len(self.remaining_ids) < 0: # TODO: same in include/exclude
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("No more cells to evaluate.")
+            msg.exec()
+            return
 
-            # display cell with id self.remaining_ids[0]
-            next_label = int(self.lineedit_start_id.text())
+        given_id = int(self.lineedit_start_id.text())
+        last_evaluated_id = self.evaluated_ids[-1] if len(self.evaluated_ids) > 0 else 0
+        candidate_ids = [i for i in self.remaining_ids if i > last_evaluated_id]
+        next_id_computed = min(candidate_ids) if len(candidate_ids) > 0 else self.remaining_ids[0]
 
-            self.display_cell(next_label)
-            self.current_cell_layer.selected_label = next_label
-            if len(self.remaining_ids) > 1:
-                self.lineedit_start_id.setText(str(self.remaining_ids[1]))
+        if given_id != next_id_computed:
+            if given_id not in self.remaining_ids:
+                candidate_ids = [i for i in self.remaining_ids if i < given_id]
+                if len(candidate_ids) > 0:
+                    next_id = candidate_ids[-1]
+                else:
+                    next_id = self.remaining_ids[0]
             else:
-                self.lineedit_start_id.setText("")
+                next_id = given_id
+        else:
+            next_id = given_id
+
+        if next_id < last_evaluated_id:
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            if next_id_computed < last_evaluated_id:
+                msg.setText(
+                    "Dataset is finished. Jumping to earlier cells."
+                )
+            else:
+                msg.setText(
+                    "Lowering the next cell id is a bad idea."
+                )
+            msg.exec()
+        self.display_cell(next_id)
+
+        self.current_cell_layer.selected_label = next_id
+        if len(self.remaining_ids) > 1:
+            candidate_ids = [i for i in self.remaining_ids if i > next_id]
+            if len(candidate_ids) > 0:
+                next_label = candidate_ids[0]
+            else:
+                next_label = self.remaining_ids[0]
+            self.lineedit_start_id.setText(str(next_label))
+        else:
+            self.lineedit_start_id.setText("")
 
     def display_cell(self, cell_id: int):
         self.current_cell_layer.data[:] = 0
@@ -459,11 +446,12 @@ class CellAnalyzer(QWidget):
 
         if not self.label_layer is None:
             unique_ids = np.unique(self.label_layer.data)
+            accepted_cell_ids = np.unique(self.accepted_cells)
             self.remaining_ids = [
                 value
                 for value in unique_ids
-                if value not in self.evaluated_ids
-                and value not in np.unique(self.accepted_cells)
+                if not value in self.evaluated_ids
+                and not value in accepted_cell_ids
             ]
             self.amount_remaining = len(self.remaining_ids)
             self.amount_excluded = (
@@ -479,6 +467,9 @@ class CellAnalyzer(QWidget):
             self.include_on_click()
 
     def include_on_click(self, self_drawn=False):
+        if len(self.remaining_ids) < 1:
+            print("no cell to include")
+            return
         overlap = self.get_overlap()
 
         if overlap:
@@ -492,9 +483,6 @@ class CellAnalyzer(QWidget):
         current_id = np.max(self.current_cell_layer.data)
         if not self_drawn:
             self.remaining_ids.remove(current_id)
-        # if not self_drawn and current_id == self.remaining_ids[0]:
-        #     self.remaining_ids.pop(0)
-        self.lineedit_start_id.setText(str(self.remaining_ids[0]))
 
         self.add_cell_to_accepted(current_id, self.current_cell_layer.data)
 
@@ -566,9 +554,13 @@ class CellAnalyzer(QWidget):
             self.exclude_on_click()
 
     def exclude_on_click(self):
+        if len(self.remaining_ids) < 1:
+            print("no cell to exclude")
+            return
         self.amount_excluded += 1
-        excluded_id = self.remaining_ids.pop(0)
-        self.evaluated_ids.append(excluded_id)
+        current_id = np.max(self.current_cell_layer.data)
+        self.remaining_ids.remove(current_id)
+        self.evaluated_ids.append(current_id)
         self.amount_remaining = len(self.remaining_ids)
 
         self.update_labels()
@@ -691,6 +683,6 @@ class CellAnalyzer(QWidget):
             )
         else:
             msg.setText(
-                f"Cells included: {processed_ids}\nCells not included: {list(set(included_ids) - set(processed_ids))}"
+                f"Cells included: {processed_ids}\nCells not included: {list(set(included_ids) - set(processed_ids))}\nAll specified cells already included or excluded.\nOnly unprocessed cells can be included."
             )
         msg.exec()

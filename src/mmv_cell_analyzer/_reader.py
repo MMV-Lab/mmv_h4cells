@@ -119,4 +119,4 @@ def read_csv(path):  # adjust if needed if metrics are added
 
 def read_tiff(path):
     data = AICSImage(path).get_image_data("YX")
-    return data
+    return data.astype("int32")

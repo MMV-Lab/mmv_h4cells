@@ -72,4 +72,4 @@ def write_csv(
 
 def write_tiff(path: str, data: np.ndarray):
     data = data.astype(np.uint16)
-    OmeTiffWriter.save(data, path, dim_order_out="YX") # breaks on linux
+    OmeTiffWriter.save(data, path, dim_order_out="YX")
