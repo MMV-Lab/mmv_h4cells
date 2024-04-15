@@ -8,3 +8,11 @@ from mmv_cell_analyzer import CellAnalyzer
 def create_widget(make_napari_viewer):
     yield CellAnalyzer(make_napari_viewer())
 
+# widget instanzieren
+# label layer laden
+# analyse starten
+# zelle(n) akzeptieren
+# self.accepted_cells np.unique prüfen (equivalent mit self.evaluated_ids wenn keine abgelehnt)
+
+def learn_test():
+    pass
