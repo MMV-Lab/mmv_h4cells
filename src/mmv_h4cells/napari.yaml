@@ -1,4 +1,4 @@
-name: mmv_Cell-Analyzer
+name: mmv_h4cells
 display_name: Cell Analyzer
 # use 'hidden' to remove plugin from napari hub search results
 # visibility: public
@@ -6,29 +6,29 @@ display_name: Cell Analyzer
 # categories: ["Annotation", "Segmentation", "Acquisition"]
 contributions:
   commands:
-    - id: mmv_Cell-Analyzer.get_reader
-      python_name: mmv_cell_analyzer._reader:napari_get_reader
+    - id: mmv_h4cells.get_reader
+      python_name: mmv_h4cells._reader:napari_get_reader
       title: Open data with Cell Analyzer
-    - id: mmv_Cell-Analyzer.write_multiple
-      python_name: mmv_cell_analyzer._writer:write_multiple
+    - id: mmv_h4cells.write_multiple
+      python_name: mmv_h4cells._writer:write_multiple
       title: Save multi-layer data with Cell Analyzer
-    - id: mmv_Cell-Analyzer.write_single_image
-      python_name: mmv_cell_analyzer._writer:write_single_image
+    - id: mmv_h4cells.write_single_image
+      python_name: mmv_h4cells._writer:write_single_image
       title: Save image data with Cell Analyzer
-    - id: mmv_Cell-Analyzer.make_qwidget
-      python_name: mmv_cell_analyzer:CellAnalyzer
+    - id: mmv_h4cells.make_qwidget
+      python_name: mmv_h4cells:CellAnalyzer
       title: Make Cell Analyzer
   readers:
-    - command: mmv_Cell-Analyzer.get_reader
+    - command: mmv_h4cells.get_reader
       accepts_directories: false
       filename_patterns: ['*.npy']
   writers:
-    - command: mmv_Cell-Analyzer.write_multiple
+    - command: mmv_h4cells.write_multiple
       layer_types: ['image*','labels*']
       filename_extensions: []
-    - command: mmv_Cell-Analyzer.write_single_image
+    - command: mmv_h4cells.write_single_image
       layer_types: ['image']
       filename_extensions: ['.npy']
   widgets:
-    - command: mmv_Cell-Analyzer.make_qwidget
-      display_name: Cell Analyzer
+    - command: mmv_h4cells.make_qwidget
+      display_name: MMV_H4Cells

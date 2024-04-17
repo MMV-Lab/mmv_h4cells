@@ -1,11 +1,11 @@
-# mmv_Cell-Analyzer
+# MMV_H4Cells
 
-[![License BSD-3](https://img.shields.io/pypi/l/mmv_Cell-Analyzer.svg?color=green)](https://github.com/MMV-Lab/mmv_Cell-Analyzer/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/mmv_Cell-Analyzer.svg?color=green)](https://pypi.org/project/mmv_Cell-Analyzer)
-[![Python Version](https://img.shields.io/pypi/pyversions/mmv_Cell-Analyzer.svg?color=green)](https://python.org)
-[![tests](https://github.com/MMV-Lab/mmv_Cell-Analyzer/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_Cell-Analyzer/actions)
-[![codecov](https://codecov.io/gh/MMV-Lab/mmv_Cell-Analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_Cell-Analyzer)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_Cell-Analyzer)](https://napari-hub.org/plugins/mmv_Cell-Analyzer)
+[![License BSD-3](https://img.shields.io/pypi/l/mmv_h4cells.svg?color=green)](https://github.com/MMV-Lab/mmv_h4cells/raw/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/mmv_h4cells.svg?color=green)](https://pypi.org/project/mmv_h4cells)
+[![Python Version](https://img.shields.io/pypi/pyversions/mmv_h4cells.svg?color=green)](https://python.org)
+[![tests](https://github.com/MMV-Lab/mmv_h4cells/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_h4cells/actions)
+[![codecov](https://codecov.io/gh/MMV-Lab/mmv_h4cells/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_h4cells)
+[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_h4cells)](https://napari-hub.org/plugins/mmv_h4cells)
 
 A simple plugin to help with analyzing cells in napari
 
@@ -23,15 +23,15 @@ https://napari.org/stable/plugins/index.html
 
 ## Installation
 
-You can install `mmv_Cell-Analyzer` via [pip]:
+You can install `mmv_h4cells` via [pip]:
 
-    pip install mmv_Cell-Analyzer
+    pip install mmv_h4cells
 
 
 
 To install latest development version :
 
-    pip install git+https://github.com/MMV-Lab/mmv_Cell-Analyzer.git
+    pip install git+https://github.com/MMV-Lab/mmv_h4cells.git
 
 
 ## Documentation
@@ -75,7 +75,7 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"mmv_Cell-Analyzer" is free and open source software
+"mmv_h4cells" is free and open source software
 
 ## Issues
 
@@ -92,7 +92,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
 [cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
 
-[file an issue]: https://github.com/MMV-Lab/mmv_Cell-Analyzer/issues
+[file an issue]: https://github.com/MMV-Lab/mmv_h4cells/issues
 
 [napari]: https://github.com/napari/napari
 [tox]: https://tox.readthedocs.io/en/latest/
