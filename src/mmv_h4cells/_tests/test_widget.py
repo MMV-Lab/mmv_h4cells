@@ -1,7 +1,7 @@
 """Tests for main widget"""
 import pytest
 
-from mmv_cell_analyzer import CellAnalyzer
+from mmv_h4cells import CellAnalyzer
 
 
 @pytest.fixture
