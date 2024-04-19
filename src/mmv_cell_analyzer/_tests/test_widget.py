@@ -3,7 +3,11 @@
 import pytest
 from pathlib import Path
 from aicsimageio import AICSImage
-from glob import glob
+# from glob import glob
+import pandas as pd
+# import numpy as np
+
+from time import perf_counter as pc
 
 from mmv_cell_analyzer import CellAnalyzer
 
@@ -45,7 +49,22 @@ def test_learn(create_widget):
     # include multiple cells
     widget.include_multiple_on_click()
 
-    # test evaluated/remaining cells
-    print(included_ids)
+    # test evaluated/accepted/remaining cells
     assert all(id in widget.evaluated_ids for id in included_ids)
-    assert not any(id in widget.remaining_ids for id in included_ids)
+    assert all(id in pd.unique(widget.accepted_cells.flatten()) for id in included_ids)
+    assert not any(id in widget.remaining_ids for id in included_ids)    
+
+    ''' # performance test np.unique/pd.unique => 
+    pc_start_np = pc()
+    for i in range(1000):
+        assert all(id in np.unique(widget.accepted_cells) for id in included_ids)
+    pc_end_np = pc()
+    pc_start_pd = pc()
+    for i in range(1000):
+        assert all(id in pd.unique(widget.accepted_cells.flatten()) for id in included_ids)
+    # assert all(id in pd.unique(widget.accepted_cells.flatten()) for id in included_ids)    
+    pc_end_pd = pc()
+    print(f"np: {pc_end_np - pc_start_np}")
+    print(f"pd: {pc_end_pd - pc_start_pd}")
+    '''
+
