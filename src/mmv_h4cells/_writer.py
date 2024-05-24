@@ -1,6 +1,6 @@
 import numpy as np
 import csv
-from typing import List, Tuple
+from typing import List, Tuple, Set
 from aicsimageio.writers import OmeTiffWriter
 from qtpy.QtWidgets import QFileDialog
 import json
@@ -53,17 +53,26 @@ def get_writer(path):
 
 
 def write_csv(
-    path: str, data: List[Tuple[int, int, Tuple[int, int]]], metrics: Tuple[float, float], pixelsize: Tuple[float, str], excluded: List[int]
+    path: str,
+    data: List[Tuple[int, int, Tuple[int, int]]],
+    metrics: Tuple[float, float],
+    pixelsize: Tuple[float, str],
+    excluded: Set[int],
+    undo_stack: List[int],
 ):  # adjust if Metrics are added
     with open(path, "w", newline="") as file:
         csv_writer = csv.writer(file)
 
-        csv_writer.writerow(["ID", "Size [px]", "Centroid", ""] + [json.dumps(excluded)]) #, "metric name"
+        csv_writer.writerow(
+            ["ID", "Size [px]", "Centroid", ""]
+            + [json.dumps(excluded)]
+            + [json.dumps(undo_stack)]
+        )  # , "metric name"
         for row in data:
             csv_writer.writerow(row)
 
         csv_writer.writerow([])
-        csv_writer.writerow(["Mean size", "Std size"]) #, "metric name"
+        csv_writer.writerow(["Mean size", "Std size"])  # , "metric name"
         csv_writer.writerow(metrics)
         csv_writer.writerow([])
         csv_writer.writerow(["1 pixel equals:"])
