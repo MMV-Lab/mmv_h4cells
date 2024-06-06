@@ -396,7 +396,7 @@ class CellAnalyzer(QWidget):
         self.lineedit_conversion_rate.setText(str(pixelsize[0]))
         self.combobox_conversion_unit.setCurrentText(pixelsize[1])
         self.accepted_cells = read(tiff_filepath)
-        self.accepted = set(pd.unique(self.accepted_cells)) - {0}
+        self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
         # accepted_ids = [
         #     accepted
         #     for accepted in np.unique(self.accepted_cells)
@@ -409,9 +409,9 @@ class CellAnalyzer(QWidget):
 
         if not self.layer_to_evaluate is None:
             self.logger.debug("Filling in values for existing label layer")
-            unique_ids = pd.unique(self.layer_to_evaluate.data)
+            unique_ids = pd.unique(self.layer_to_evaluate.data.flatten())
             # accepted_cell_ids = pd.unique(self.accepted_cells)
-            self.remaining = set(unique_ids) - (self.accepted | self.excluded)
+            self.remaining = set(unique_ids) - (self.included | self.excluded | {0})
             # self.remaining_ids = [
             #     value
             #     for value in unique_ids
@@ -479,7 +479,10 @@ class CellAnalyzer(QWidget):
         if self.check_for_overlap():
             return
 
-        self.include(not self_drawn)
+        id_ = int(np.max(self.current_cell_layer.data))
+        self.include(id_,self.current_cell_layer.data,not self_drawn)
+
+        self.undo_stack.append(id_)
 
         if len(self.remaining) > 0:
         # if len(self.remaining_ids) > 0:
@@ -492,7 +495,7 @@ class CellAnalyzer(QWidget):
             self.logger.info("No cell to exclude")
             return
         # self.amount_excluded += 1
-        current_id = max(pd.unique(self.current_cell_layer.data.flatten()))
+        current_id = int(max(pd.unique(self.current_cell_layer.data.flatten())))
         # current_id = np.max(self.current_cell_layer.data)
         self.excluded.add(current_id)
         self.remaining.remove(current_id)
@@ -551,6 +554,7 @@ class CellAnalyzer(QWidget):
         else:
             self.logger.debug("Hiding included cells...")
             self.viewer.layers.remove(self.included_layer)
+            self.included_layer = None
             self.toggle_visibility_label_layers()
             self.btn_show_included.setText("Show Included")
 
@@ -570,6 +574,7 @@ class CellAnalyzer(QWidget):
         else:
             self.logger.debug("Hiding excluded cells...")
             self.viewer.layers.remove(self.excluded_layer)
+            self.excluded_layer = None
             self.toggle_visibility_label_layers()
             self.btn_show_excluded.setText("Show Excluded")
 
@@ -588,6 +593,7 @@ class CellAnalyzer(QWidget):
         else:
             self.logger.debug("Hiding remaining cells...")
             self.viewer.layers.remove(self.remaining_layer)
+            self.remaining_layer = None
             self.toggle_visibility_label_layers()
             self.btn_show_remaining.setText("Show Remaining")
 
@@ -681,18 +687,22 @@ class CellAnalyzer(QWidget):
     
     def include_multiple(self, ids: List[int]) -> Tuple[Set[int], Set[int], Set[int]]:
         self.logger.debug("Including multiple cells...")
-        included = {}
-        ignored = {}
-        overlapped = {}
+        included = set()
+        ignored = set()
+        overlapped = set()
         for val in ids:
             if val not in self.remaining:
                 ignored.add(val)
                 continue
             indices = np.where(self.layer_to_evaluate.data == val)
-            if sum(self.accepted_cells[indices]):
+            print(np.sum(self.accepted_cells[indices]))
+            if np.sum(self.accepted_cells[indices]):
                 overlapped.add(val)
                 continue
-            self.include(val)
+            data_array = np.zeros_like(self.layer_to_evaluate.data)
+            data_array[indices] = val
+            self.include(val, data_array)
+            included.add(val)
         self.logger.debug("Multiple cells evaluated")
         return included, ignored, overlapped
 
@@ -712,11 +722,12 @@ class CellAnalyzer(QWidget):
             self.current_cell_layer.mode = "paint"
             # Select unique id
             self.current_cell_layer.selected_label = (
-                max(np.max(self.accepted_cells), max(self.remaining_ids)) + 1
+                max(np.max(self.accepted_cells), np.max(self.layer_to_evaluate.data)) + 1
             )
         else:
             self.logger.debug("Draw own cell confirmed")
             self.include_on_click(True)
+            self.btn_segment.setText("Draw own cell")
 
     def display_next_cell(self, check_lowered=True):
         self.logger.debug("Displaying next cell...")
@@ -742,6 +753,10 @@ class CellAnalyzer(QWidget):
 
         if given_id != next_id_computed:
             if given_id not in self.remaining:
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText("Given id is not in remaining cells.")
+                msg.exec_()
                 candidate_ids = [i for i in self.remaining if i < given_id]
             # if given_id not in self.remaining_ids:
             #     candidate_ids = [i for i in self.remaining_ids if i < given_id]
@@ -779,7 +794,7 @@ class CellAnalyzer(QWidget):
             msg.exec_()
         self.display_cell(next_id)
 
-        if len(self.remaining) > 0:
+        if len(self.remaining) > 1:
         # if len(self.remaining_ids) > 1:
             candidate_ids = [i for i in self.remaining if i > next_id]
             # candidate_ids = [i for i in self.remaining_ids if i > next_id]
@@ -793,15 +808,19 @@ class CellAnalyzer(QWidget):
             self.lineedit_next_id.setText("")
         self.logger.debug("Value for next cell set")
 
-    def include(self, remove_from_remaining: bool = True):
+    def include(self, id_: int, data_array: np.ndarray, remove_from_remaining: bool = True):
         self.logger.debug("Including cell...")
-        self.accepted_cells += self.current_cell_layer.data
-        current_id = np.max(self.current_cell_layer.data)
+        self.accepted_cells += data_array
+        # self.accepted_cells += self.current_cell_layer.data
+        # current_id = np.max(self.current_cell_layer.data)
         if remove_from_remaining:
-            self.remaining.remove(current_id)
+            self.remaining.remove(id_)
+            # self.remaining.remove(current_id)
             # self.remaining_ids.remove(current_id)
+        self.included.add(id_)
 
-        self.add_cell_to_accepted(current_id, self.current_cell_layer.data)
+        self.add_cell_to_accepted(id_, data_array)
+        # self.add_cell_to_accepted(current_id, self.current_cell_layer.data)
 
     def check_for_overlap(self, self_drawn=False):
         self.logger.debug("Checking for overlap...")
@@ -823,18 +842,13 @@ class CellAnalyzer(QWidget):
             A set of tuples containing the indices of the overlapping pixels.
         """
         self.logger.debug("Calculating overlap...")
-        nonzero_current = np.transpose(
-            np.nonzero(self.current_cell_layer.data)
-        )
+        nonzero_current = np.nonzero(self.current_cell_layer.data)
         accepted_cells = np.copy(self.accepted_cells)
-        combined_layer = accepted_cells + self.layer_to_evaluate.data
-        combined_layer[
-            combined_layer == np.max(self.current_cell_layer.data)
-        ] = 0
-        nonzero_other = np.transpose(np.nonzero(combined_layer))
-        overlap = set(map(tuple, nonzero_current)).intersection(
-            map(tuple, nonzero_other)
-        )
+        nonzero_accepted = np.nonzero(accepted_cells)
+        combined_layer = np.zeros_like(self.layer_to_evaluate.data)
+        combined_layer[nonzero_current] += 1
+        combined_layer[nonzero_accepted] += 1
+        overlap = set(map(tuple, np.transpose(np.where(combined_layer == 2))))
         return overlap
 
     def add_cell_to_accepted(self, cell_id: int, data: np.ndarray):
@@ -875,7 +889,7 @@ class CellAnalyzer(QWidget):
         overlap_layer = self.viewer.add_labels(
             np.zeros_like(self.layer_to_evaluate.data), name="Overlap", opacity=1
         )
-        overlap_layer.data[overlap_indices] = min(self.remaining) - 1
+        overlap_layer.data[overlap_indices] = np.amax(self.current_cell_layer.data) + 1
         # overlap_layer.data[overlap_indices] = self.remaining_ids[0] + 1
         overlap_layer.refresh()
         msg = QMessageBox()

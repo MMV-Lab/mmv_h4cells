@@ -65,7 +65,7 @@ def write_csv(
 
         csv_writer.writerow(
             ["ID", "Size [px]", "Centroid", ""]
-            + [json.dumps(excluded)]
+            + [json.dumps(list(excluded))]
             + [json.dumps(undo_stack)]
         )  # , "metric name"
         for row in data:
