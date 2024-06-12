@@ -2,6 +2,7 @@ import numpy as np
 import csv
 from typing import List, Tuple, Set
 from aicsimageio.writers import OmeTiffWriter
+from pathlib import Path
 from qtpy.QtWidgets import QFileDialog
 import json
 
@@ -24,7 +25,7 @@ def save_dialog(parent, filetype="*.csv", directory=""):
     str
         Path of selected file
     """
-    dialog = QFileDialog()
+    dialog = QFileDialog() #THIS BREAKS IN TEST IF GETSAVEFILENAME IS MOCKED. WHY?
     filepath, _ = dialog.getSaveFileName(
         parent,
         "Select location for CSV and TIFF-File to be created",
@@ -37,12 +38,12 @@ def save_dialog(parent, filetype="*.csv", directory=""):
     return filepath
 
 
-def write(path: str, *data):
+def write(path: Path, *data):
     writer = get_writer(path)
     writer(path, *data)
 
 
-def get_writer(path):
+def get_writer(path: Path):
     if path.suffix == ".csv":
         return write_csv
 
@@ -53,7 +54,7 @@ def get_writer(path):
 
 
 def write_csv(
-    path: str,
+    path: Path,
     data: List[Tuple[int, int, Tuple[int, int]]],
     metrics: Tuple[float, float],
     pixelsize: Tuple[float, str],
@@ -79,6 +80,6 @@ def write_csv(
         csv_writer.writerow(pixelsize)
 
 
-def write_tiff(path: str, data: np.ndarray):
+def write_tiff(path: Path, data: np.ndarray):
     data = data.astype(np.uint16)
     OmeTiffWriter.save(data, path, dim_order_out="YX")

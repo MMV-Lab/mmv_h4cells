@@ -23,6 +23,8 @@ from mmv_h4cells._writer import save_dialog, write
 from napari.layers.labels.labels import Labels
 from scipy import ndimage
 
+import time
+
 
 class CellAnalyzer(QWidget):
     def __init__(self, viewer: napari.viewer.Viewer):
@@ -386,16 +388,28 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Importing data...")
         csv_filepath = Path(open_dialog(self))
         if str(csv_filepath) == ".":
-            self.logger.debug("No file selected. Aborting.")
+            self.logger.debug("No csv file selected. Aborting.")
             return
         tiff_filepath = csv_filepath.with_suffix(".tiff")
+        try:
+            accepted_cells = read(tiff_filepath)
+        except FileNotFoundError:
+            tiff_filepath = tiff_filepath.with_suffix(".tif")
+            try:
+                accepted_cells = read(tiff_filepath)
+            except FileNotFoundError:
+                tiff_filepath = Path(open_dialog(self, filetype="*.tiff *.tif"))
+                if str(tiff_filepath) == ".":
+                    self.logger.debug("No tiff file selected. Aborting.")
+                    return
+                accepted_cells = read(tiff_filepath)
+        self.accepted_cells = accepted_cells
         self.metric_data, metrics, pixelsize, self.excluded, self.undo_stack = read(
             csv_filepath
         )
         self.mean_size, self.std_size = metrics  # , self.metric_value = ...
         self.lineedit_conversion_rate.setText(str(pixelsize[0]))
         self.combobox_conversion_unit.setCurrentText(pixelsize[1])
-        self.accepted_cells = read(tiff_filepath)
         self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
         # accepted_ids = [
         #     accepted
@@ -471,6 +485,7 @@ class CellAnalyzer(QWidget):
 
     def include_on_click(self, self_drawn=False):
         self.logger.debug("Including cell...")
+        starttime_abs = time.time()
         if len(self.remaining) < 1:
         # if len(self.remaining_ids) < 1:
             self.logger.info("No cell to include")
@@ -479,14 +494,24 @@ class CellAnalyzer(QWidget):
         if self.check_for_overlap():
             return
 
+        endtime = time.time()
+        self.logger.debug(f"Runtime overlap check: {endtime - starttime_abs}")
+        starttime = time.time()
         id_ = int(np.max(self.current_cell_layer.data))
         self.include(id_,self.current_cell_layer.data,not self_drawn)
+        endtime = time.time()
+        self.logger.debug(f"Runtime include: {endtime - starttime}")
 
         self.undo_stack.append(id_)
 
         if len(self.remaining) > 0:
+            starttime = time.time()
         # if len(self.remaining_ids) > 0:
             self.display_next_cell()
+            endtime = time.time()
+            self.logger.debug(f"Runtime display next cell: {endtime - starttime}")
+        endtime_abs = time.time()
+        self.logger.debug(f"Runtime complete: {endtime_abs - starttime_abs}")
 
     def exclude_on_click(self):
         self.logger.debug("Excluding cell...")
@@ -571,7 +596,7 @@ class CellAnalyzer(QWidget):
             self.excluded_layer = self.viewer.add_labels(
                 data, name="Excluded Cells"
             )
-        else:
+        else: # TODO
             self.logger.debug("Hiding excluded cells...")
             self.viewer.layers.remove(self.excluded_layer)
             self.excluded_layer = None
@@ -695,7 +720,6 @@ class CellAnalyzer(QWidget):
                 ignored.add(val)
                 continue
             indices = np.where(self.layer_to_evaluate.data == val)
-            print(np.sum(self.accepted_cells[indices]))
             if np.sum(self.accepted_cells[indices]):
                 overlapped.add(val)
                 continue
@@ -745,8 +769,8 @@ class CellAnalyzer(QWidget):
         last_evaluated_id = self.undo_stack[-1] if len(self.undo_stack) > 0 else 0
         # last_evaluated_id = self.evaluated_ids[-1] if len(self.evaluated_ids) > 0 else 0
         self.logger.debug(f"Last evaluated id: {last_evaluated_id}")
-        candidate_ids = [i for i in self.remaining if i > last_evaluated_id]
-        next_id_computed = min(candidate_ids) if len(candidate_ids) > 0 else min(self.remaining)
+        candidate_ids = sorted([i for i in self.remaining if i > last_evaluated_id])
+        next_id_computed = candidate_ids[0] if len(candidate_ids) > 0 else min(self.remaining)
         # candidate_ids = [i for i in self.remaining_ids if i > last_evaluated_id]
         # next_id_computed = min(candidate_ids) if len(candidate_ids) > 0 else self.remaining_ids[0]
         self.logger.debug(f"Computed next id: {next_id_computed}")
@@ -757,7 +781,7 @@ class CellAnalyzer(QWidget):
                 msg.setWindowTitle("napari")
                 msg.setText("Given id is not in remaining cells.")
                 msg.exec_()
-                candidate_ids = [i for i in self.remaining if i < given_id]
+                candidate_ids = sorted([i for i in self.remaining if i < given_id])
             # if given_id not in self.remaining_ids:
             #     candidate_ids = [i for i in self.remaining_ids if i < given_id]
                 if len(candidate_ids) > 0:
@@ -796,7 +820,7 @@ class CellAnalyzer(QWidget):
 
         if len(self.remaining) > 1:
         # if len(self.remaining_ids) > 1:
-            candidate_ids = [i for i in self.remaining if i > next_id]
+            candidate_ids = sorted([i for i in self.remaining if i > next_id])
             # candidate_ids = [i for i in self.remaining_ids if i > next_id]
             if len(candidate_ids) > 0:
                 next_label = candidate_ids[0]

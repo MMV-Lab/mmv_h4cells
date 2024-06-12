@@ -23,7 +23,7 @@ def create_widget(make_napari_viewer):
 def create_started_widget(create_widget):
     widget = create_widget
     file = Path(PATH / "ex-seg.tiff")
-    segmentation = AICSImage(file).get_image_data("ZYX")
+    segmentation = AICSImage(file).get_image_data("YX")
     widget.viewer.add_labels(segmentation, name="segmentation")
     widget.start_analysis_on_click()
     yield widget
@@ -185,7 +185,7 @@ def test_import(
     widget = create_widget
     if layer_loaded:
         file = Path(PATH / "ex-seg.tiff")
-        segmentation = AICSImage(file).get_image_data("ZYX")
+        segmentation = AICSImage(file).get_image_data("YX")
         widget.viewer.add_labels(segmentation, name="segmentation")
         mock_update.reset_mock()
 
@@ -235,12 +235,98 @@ def test_import(
 @patch("mmv_h4cells._widget.open_dialog", return_value=".")
 @patch("mmv_h4cells._widget.read")
 @patch.object(CellAnalyzer, "update_labels")
-def test_import_no_file(mock_update, mock_read, mock_open, create_widget):
+def test_import_no_csv(mock_update, mock_read, mock_open, create_widget):
     widget = create_widget
     widget.import_on_click()
     mock_open.assert_called_once()
     mock_read.assert_not_called()
     mock_update.assert_not_called()
+
+
+@patch("mmv_h4cells._widget.open_dialog")
+@patch("mmv_h4cells._widget.read")
+@patch.object(CellAnalyzer, "update_labels")
+def test_import_no_tiff(mock_update, mock_read, mock_open, create_widget):
+    widget = create_widget
+
+    def side_effect(_, filetype=None):
+        if filetype is None:
+            return "test.csv"
+        return "."
+
+    mock_open.side_effect = side_effect
+    mock_read.side_effect = FileNotFoundError()
+    widget.import_on_click()
+    assert mock_open.call_count == 2
+    assert mock_read.call_count == 2
+    mock_read.assert_has_calls(
+        [call(Path("test.tiff")), call(Path("test.tif"))]
+    )
+    mock_update.assert_not_called()
+
+
+@patch("mmv_h4cells._widget.open_dialog", return_value="test.csv")
+@patch("mmv_h4cells._widget.read")
+@patch.object(CellAnalyzer, "update_labels")
+def test_import_tif(mock_update, mock_read, mock_open, create_widget):
+    def side_effect(path):
+        if path.suffix == ".csv":
+            return [], (0, 0), (1, "pixel"), set(), []
+        elif path.suffix == ".tif":
+            return np.zeros((10, 10), dtype=np.int32)
+        raise FileNotFoundError()
+
+    mock_read.side_effect = side_effect
+    widget = create_widget
+    widget.import_on_click()
+    mock_open.assert_called_once()
+    assert mock_read.call_count == 3
+    mock_read.assert_has_calls(
+        [
+            call(Path("test.tiff")),
+            call(Path("test.tif")),
+            call(Path("test.csv")),
+        ]
+    )
+    mock_update.assert_called_once()
+
+
+@patch("mmv_h4cells._widget.open_dialog")
+@patch("mmv_h4cells._widget.read")
+@patch.object(CellAnalyzer, "update_labels")
+@pytest.mark.parametrize("filename", ["test.tiff", "test.tif"])
+def test_import_tiff_prompt(
+    mock_update, mock_read, mock_open, create_widget, filename
+):
+    widget = create_widget
+
+    def open_side_effect(_, filetype=None):
+        if filetype is None:
+            return "test.csv"
+        return f"subdirectory/{filename}"
+
+    mock_open.side_effect = open_side_effect
+
+    def read_side_effect(path):
+        if path.suffix == ".csv":
+            return [], (0, 0), (1, "pixel"), set(), []
+        elif path.parent == Path("subdirectory"):
+            return np.zeros((10, 10), dtype=np.int32)
+        raise FileNotFoundError()
+
+    mock_read.side_effect = read_side_effect
+    widget.import_on_click()
+    assert mock_open.call_count == 2
+    assert mock_read.call_count == 4
+    mock_read.assert_has_calls(
+        [
+            call(Path("test.tiff")),
+            call(Path("test.tif")),
+            call(Path(f"subdirectory/{filename}")),
+            call(Path("test.csv")),
+        ]
+    )
+    mock_update.called_once()
 
 
 @patch("mmv_h4cells._widget.save_dialog", return_value="test.csv")
@@ -374,7 +460,6 @@ def test_exclude_on_click(
 @patch.object(CellAnalyzer, "calculate_metrics")
 @patch.object(CellAnalyzer, "update_labels")
 @patch.object(CellAnalyzer, "display_next_cell")
-@pytest.mark.new
 @pytest.mark.parametrize("operation", ["include", "drawn", "exclude"])
 @pytest.mark.parametrize("empty", [True, False])
 def test_undo_on_click(
@@ -388,22 +473,18 @@ def test_undo_on_click(
     widget = create_started_widget
     id_ = 2
     if not empty:
-        # include must work correctly
         widget.include_on_click()
         widget.display_cell(id_)
         id_ += 1
     if operation == "exclude":
-        # exclude must work correctly
         widget.exclude_on_click()
         widget.display_cell(id_)
     elif operation == "include":
-        # include must work correctly
         widget.include_on_click()
         widget.display_cell(id_)
     else:
-        # relies on draw_own_cell working correctly
         widget.draw_own_cell()
-        widget.current_cell_layer.data[(0, 0, 0)] = (
+        widget.current_cell_layer.data[(0, 0)] = (
             widget.current_cell_layer.selected_label
         )
         widget.draw_own_cell()
@@ -458,11 +539,19 @@ def test_undo_on_click(
     mock_calculate.assert_called_once()
     mock_update.assert_called_once()
     mock_display.assert_called_once()
-    # undo include
-    # undo include from drawn
-    # undo exclude
-    # empty after undo
-    # not empty after undo
+
+
+def test_double_undo_next_ids(create_started_widget):
+    widget = create_started_widget
+    assert widget.lineedit_next_id.text() == "2"
+    widget.include_on_click()
+    assert widget.lineedit_next_id.text() == "3"
+    widget.exclude_on_click()
+    assert widget.lineedit_next_id.text() == "4"
+    widget.undo_on_click()
+    assert widget.lineedit_next_id.text() == "3"
+    widget.undo_on_click()
+    assert widget.lineedit_next_id.text() == "2"
 
 
 @patch.object(CellAnalyzer, "calculate_metrics")
@@ -672,15 +761,15 @@ def test_include_multiple(mock_include, create_widget_in_analysis, ids):
 def test_include_multiple_overlap(create_widget_in_analysis):
     widget = create_widget_in_analysis
     widget.layer_to_evaluate.data[:] = 0
-    widget.layer_to_evaluate.data[0, 0, 0] = 3
-    widget.layer_to_evaluate.data[0, 1, 1] = 3
-    widget.layer_to_evaluate.data[0, 2, 2] = 4
-    widget.layer_to_evaluate.data[0, 3, 3] = 4
+    widget.layer_to_evaluate.data[0, 0] = 3
+    widget.layer_to_evaluate.data[1, 1] = 3
+    widget.layer_to_evaluate.data[2, 2] = 4
+    widget.layer_to_evaluate.data[3, 3] = 4
     widget.accepted_cells[:] = 0
-    widget.accepted_cells[0, 0, 0] = 5
-    widget.accepted_cells[0, 1, 1] = 5
-    widget.accepted_cells[0, 2, 2] = 5
-    widget.accepted_cells[0, 3, 3] = 5
+    widget.accepted_cells[0, 0] = 5
+    widget.accepted_cells[1, 1] = 5
+    widget.accepted_cells[2, 2] = 5
+    widget.accepted_cells[3, 3] = 5
     included, ignored, overlapped = widget.include_multiple([3, 4])
     print(included, ignored, overlapped)
     assert included == set()
