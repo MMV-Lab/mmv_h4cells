@@ -126,8 +126,8 @@ class CellAnalyzer(QWidget):
         label_included = QLabel("Included:")
         label_excluded = QLabel("Excluded:")
         label_remaining = QLabel("Remaining:")
-        label_mean = QLabel("Mean size:")
-        label_std = QLabel("Std size:")
+        label_mean = QLabel("Mean size [px]:")
+        label_std = QLabel("Std size [px]:")
         # label_metric = QLabel("Metric name:")
         # label_conversion = QLabel("1 pixel equals:")
         self.label_amount_included = QLabel("0")
@@ -137,7 +137,17 @@ class CellAnalyzer(QWidget):
         self.label_std_included = QLabel("0")
         # self.label_metric_included = QLabel("0")
         label_range_x = QLabel("Range x:")
+        label_range_x.setToolTip(
+            "The range of x values (left to right) to be included in the analysis.\n"
+            + "First value must be lower than second. First value must be at least 0.\n"
+            + "First value can be -1 to evaluate everything right of the first value."
+        )
         label_range_y = QLabel("Range y:")
+        label_range_y.setToolTip(
+            "The range of y values (top to bottom) to be included in the analysis.\n"
+            + "First value must be lower than second. First value must be at least 0.\n"
+            + "First value can be -1 to evaluate everything below the first value."
+        )
         label_threshold_size = QLabel("Threshold size:")
 
         label_mean.setToolTip(
@@ -249,6 +259,17 @@ class CellAnalyzer(QWidget):
 
         # QGroupBoxes
         groupbox_roi = QGroupBox("ROI Analysis")
+        groupbox_roi.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid silver;
+                margin-top: 2ex; /* leave space at the top for the title */
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center; /* position at the top center */
+                padding: 0 3px;
+            }
+            """)
         groupbox_roi.setLayout(QGridLayout())
         groupbox_roi.layout().addWidget(label_range_y, 0, 0, 1, 1)
         groupbox_roi.layout().addWidget(self.lineedit_y_low, 0, 1, 1, 1)
@@ -350,12 +371,13 @@ class CellAnalyzer(QWidget):
         if len(self.metric_data) > 0:
             max_id = np.max(self.accepted_cells)
             self.logger.debug(f"Highest evaluated id: {max_id}")
-            self.remaining = set(unique_ids) - (self.included | self.excluded)
+            self.remaining = set(unique_ids) - (self.included | self.excluded | {0})
         else:
             max_id = 0
             self.accepted_cells = np.zeros_like(self.layer_to_evaluate.data)
             self.remaining = set(unique_ids) - {0}
-        self.lineedit_next_id.setText(str(min(self.remaining)))
+        next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
+        self.lineedit_next_id.setText(next_id)
         self.logger.debug("Sets updated")
         self.update_labels()
 
@@ -371,8 +393,8 @@ class CellAnalyzer(QWidget):
         #     unit = self.combobox_conversion_unit.currentText() + "²"
         #     factor = float(self.lineedit_conversion_rate.text())
         # self.logger.debug(f"Conversion rate: {factor} {unit}")
-        self.label_mean_included.setText(f"{str(self.mean_size)} [px]")
-        self.label_std_included.setText(f"{str(self.std_size)} [px]")
+        self.label_mean_included.setText(str(self.mean_size))
+        self.label_std_included.setText(str(self.std_size))
         # self.label_mean_included.setText(
         #     f"{str(self.mean_size*factor)} {unit}"
         # )
@@ -381,6 +403,24 @@ class CellAnalyzer(QWidget):
 
     def start_analysis_on_click(self):
         self.logger.debug("Analysis started...")
+        try:
+            start_id = int(
+                self.lineedit_next_id.text()
+            )  
+        except ValueError:
+            self.logger.warning("Invalid start id")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("Invalid start id")
+            msg.exec_()
+            return
+        if len(self.remaining) < 1:
+            self.logger.info("No cell to evaluate")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("No cells to evaluate")
+            msg.exec_()
+            return
         self.btn_start_analysis.setEnabled(False)
         self.btn_exclude.setEnabled(True)
         self.btn_include.setEnabled(True)
@@ -397,9 +437,6 @@ class CellAnalyzer(QWidget):
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.layer_to_evaluate.data), name="Current Cell"
         )
-        start_id = int(
-            self.lineedit_next_id.text()
-        )  # TODO: catch ValueError if not int
         if not start_id in self.remaining:
             self.logger.warning("Start id not in remaining ids")
             lower_ids = {value for value in self.remaining if value < start_id}
@@ -476,7 +513,8 @@ class CellAnalyzer(QWidget):
             self.remaining = set(unique_ids) - (
                 self.included | self.excluded | {0}
             )
-            self.lineedit_next_id.setText(str(min(self.remaining)))
+            next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
+            self.lineedit_next_id.setText(next_id)
             self.btn_start_analysis.setEnabled(True)
 
         self.update_labels()
@@ -518,6 +556,10 @@ class CellAnalyzer(QWidget):
         starttime_abs = time.time()
         if len(self.remaining) < 1:
             self.logger.info("No cell to include")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("No remaining cells")
+            msg.exec_()
             return
 
         if self.check_for_overlap():
@@ -547,6 +589,10 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Excluding cell...")
         if len(self.remaining) < 1:
             self.logger.info("No cell to exclude")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("No remaining cells")
+            msg.exec_()
             return
         current_id = int(
             max(pd.unique(self.current_cell_layer.data.flatten()))
@@ -672,9 +718,10 @@ class CellAnalyzer(QWidget):
             self.logger.debug("No valid ids in input")
             return
         self.logger.debug(f"Given ids: {given_ids}")
-        included, ignored, overlapped = self.include_multiple(given_ids)
+        included, ignored, overlapped, faulty = self.include_multiple(given_ids)
         self.lineedit_include.setText("")
-        self.lineedit_next_id.setText(str(min(self.remaining)))
+        next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
+        self.lineedit_next_id.setText(next_id)
         self.display_next_cell(False)
         msg = QMessageBox()
         msg.setWindowTitle("napari")
@@ -686,9 +733,14 @@ class CellAnalyzer(QWidget):
                 f"Cells ignored as they are already evaluated: {ignored}\n"
             )
             msgtext += "Only unprocessed cells can be included.\n"
+        if len(faulty) > 0:
+            msgtext += f"Cells ignored due to nonexistance: {faulty}\n"
+            msgtext += "Please only enter existing cell ids.\n"
         if len(overlapped) > 0:
             msgtext += f"Cells not included due to overlap: {overlapped}\n"
             msgtext += "Please remove the overlap(s)."
+        if msgtext == "":
+            msgtext = "0 is not a valid cell id."
         msg.setText(msgtext)
         msg.exec_()
 
@@ -723,7 +775,14 @@ class CellAnalyzer(QWidget):
         included = set()
         ignored = set()
         overlapped = set()
+        faulty = set()
+        existing_ids = set(pd.unique(self.layer_to_evaluate.data.flatten()))
         for val in ids:
+            if val == 0:
+                continue
+            if val not in existing_ids:
+                faulty.add(val)
+                continue
             if val not in self.remaining:
                 ignored.add(val)
                 continue
@@ -735,8 +794,9 @@ class CellAnalyzer(QWidget):
             data_array[indices] = val
             self.include(val, data_array)
             included.add(val)
+            self.undo_stack.append(val)
         self.logger.debug("Multiple cells evaluated")
-        return included, ignored, overlapped
+        return included, ignored, overlapped, faulty
 
     def draw_own_cell(self):
         if self.btn_segment.text() == "Draw own cell":
@@ -1003,7 +1063,6 @@ class CellAnalyzer(QWidget):
                 and not ("high" in lineedit.objectName() and value == -1)
             ):
                 lineedit.setText("")
-                print("first check")
                 params.append(None)
                 continue
             min_ = 1 if "high" in lineedit.objectName() else 0
@@ -1015,7 +1074,6 @@ class CellAnalyzer(QWidget):
             max_ -= 1 if "low" in lineedit.objectName() else 0
             if (value < min_ or value > max_ and lineedit.objectName() != "") and value != -1:
                 lineedit.setText("")
-                print("second check")
                 params.append(None)
                 continue
             params.append(value)
@@ -1024,7 +1082,11 @@ class CellAnalyzer(QWidget):
         if None in params:
             msg = QMessageBox()
             msg.setWindowTitle("napari")
-            msg.setText("Please enter valid integer values.")
+            if params[-1] is None:
+                msg_text = "Threshold must be a positive integer."
+            else:
+                msg_text = "All values for Range y and Range x must be set."
+            msg.setText(msg_text)
             msg.exec_()
             raise ValueError("Invalid ROI parameters.")
 
@@ -1034,7 +1096,10 @@ class CellAnalyzer(QWidget):
         try:
             value = int(lineedit.text())
         except ValueError:
-            value = -1
+            if lineedit.objectName() == "":
+                value = 0
+            else:
+                value = None
         return value
 
     def call_export(self, params):
