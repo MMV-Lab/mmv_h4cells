@@ -210,6 +210,7 @@ class CellAnalyzer(QWidget):
         # LineEdits
         self.lineedit_next_id = QLineEdit()
         self.lineedit_conversion_rate = QLineEdit()
+        self.lineedit_conversion_rate.returnPressed.connect(self.update_labels)
         self.lineedit_include = QLineEdit()
         self.lineedit_x_low = QLineEdit()
         self.lineedit_x_low.setObjectName("x_low")
@@ -478,7 +479,11 @@ class CellAnalyzer(QWidget):
             self.undo_stack,
         ) = read(csv_filepath)
         self.mean_size, self.std_size = metrics  # , self.metric_value = ...
-        self.lineedit_conversion_rate.setText(str(pixelsize[0]))
+        (
+            self.lineedit_conversion_rate.setText(str(pixelsize[0]))
+            if pixelsize[1] != "pixel"
+            else self.lineedit_conversion_rate.setText("")
+        )
         self.combobox_conversion_unit.setCurrentText(pixelsize[1])
         self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
         # accepted_ids = [
