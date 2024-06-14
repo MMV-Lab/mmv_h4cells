@@ -48,4 +48,4 @@ def analyse_roi(
     filtered_mask = np.isin(data, df[df['count [px]'] > size_threshold]['id'])
     data[~filtered_mask] = 0
 
-    return data, df, paths
+    return data, df, paths, size_threshold

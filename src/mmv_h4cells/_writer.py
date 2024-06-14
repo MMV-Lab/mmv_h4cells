@@ -57,7 +57,7 @@ def write_csv(
     path: Path,
     data: List[Tuple[int, int, Tuple[int, int]]],
     metrics: Tuple[float, float],
-    pixelsize: Tuple[float, str],
+    # pixelsize: Tuple[float, str],
     excluded: Set[int],
     undo_stack: List[int],
 ):  # adjust if Metrics are added
@@ -73,11 +73,11 @@ def write_csv(
             csv_writer.writerow(row)
 
         csv_writer.writerow([])
-        csv_writer.writerow(["Mean size", "Std size"])  # , "metric name"
+        csv_writer.writerow(["Mean size [px]", "Std size [px]", "Threshold size [px]"])  # , "metric name"
         csv_writer.writerow(metrics)
-        csv_writer.writerow([])
-        csv_writer.writerow(["1 pixel equals:"])
-        csv_writer.writerow(pixelsize)
+        # csv_writer.writerow([])
+        # csv_writer.writerow(["1 pixel equals:"])
+        # csv_writer.writerow(pixelsize)
 
 
 def write_tiff(path: Path, data: np.ndarray):
