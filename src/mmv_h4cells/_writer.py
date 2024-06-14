@@ -25,7 +25,7 @@ def save_dialog(parent, filetype="*.csv", directory=""):
     str
         Path of selected file
     """
-    dialog = QFileDialog() #THIS BREAKS IN TEST IF GETSAVEFILENAME IS MOCKED. WHY?
+    dialog = QFileDialog()
     filepath, _ = dialog.getSaveFileName(
         parent,
         "Select location for CSV and TIFF-File to be created",
