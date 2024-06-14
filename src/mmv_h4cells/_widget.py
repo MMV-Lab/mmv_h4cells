@@ -179,6 +179,7 @@ class CellAnalyzer(QWidget):
         self.btn_include_multiple.clicked.connect(
             self.include_multiple_on_click
         )
+        self.btn_export_roi.clicked.connect(self.export_roi_on_click)
 
         self.btn_export.setToolTip(
             "Export mask of included cells and analysis csv"
@@ -1131,6 +1132,7 @@ class CellAnalyzer(QWidget):
                 and not ("high" in lineedit.objectName() and value == -1)
             ):
                 lineedit.setText("")
+                print("first check")
                 params.append(None)
                 continue
             min_ = 1 if "high" in lineedit.objectName() else 0
@@ -1140,12 +1142,14 @@ class CellAnalyzer(QWidget):
                 else self.layer_to_evaluate.data.shape[1]
             )
             max_ -= 1 if "low" in lineedit.objectName() else 0
-            if value < min_ or value > max_ and lineedit.objectName() != "":
+            if (value < min_ or value > max_ and lineedit.objectName() != "") and value != -1:
                 lineedit.setText("")
+                print("second check")
                 params.append(None)
                 continue
             params.append(value)
 
+        self.logger.debug(f"ROI parameters: {params}")
         if None in params:
             msg = QMessageBox()
             msg.setWindowTitle("napari")
@@ -1159,9 +1163,23 @@ class CellAnalyzer(QWidget):
         try:
             value = int(lineedit.text())
         except ValueError:
-            value = None
+            value = -1
         return value
 
-    def call_export(self, **params):
+    def call_export(self, params):
         self.logger.debug("Exporting ROI data...")
-        print(params)
+        image, df, paths = params
+        csv_filepath, tiff_filepath = paths
+        data = df.itertuples(index=False)
+        metrics = (df["count [px]"].mean(), df["count [px]"].std())
+        if self.lineedit_conversion_rate.text() == "":
+            factor = 1
+            unit = "pixel"
+        else:
+            factor = float(
+                self.lineedit_conversion_rate.text()
+            )  # TODO: catch ValueError if not float
+            unit = self.combobox_conversion_unit.currentText()
+        pixelsize = (factor, unit)
+        write(csv_filepath, data, metrics, pixelsize, set(), []) # TODO
+        write(tiff_filepath, image)

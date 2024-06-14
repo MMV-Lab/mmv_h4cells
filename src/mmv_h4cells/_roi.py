@@ -12,7 +12,7 @@ def analyse_roi(
     size_threshold: int,
     paths: Tuple[str, str],
 ):
-    cropped_mask = data[y[0]:y[y], x[0]:x[1]]
+    cropped_mask = data[y[0]:y[1], x[0]:x[1]]
     
     # Get unique ids and counts
     ids, counts = np.unique(cropped_mask, return_counts=True)
@@ -40,7 +40,7 @@ def analyse_roi(
     df = df[df['count [px]'] > size_threshold]
 
     # Get full mask and ignore labels outside ROI
-    mask_outside_range = np.ones_like(data dtype=bool)
+    mask_outside_range = np.ones_like(data, dtype=bool)
     mask_outside_range[y[0]:y[1], x[0]:x[1]] = False
     data[mask_outside_range] = 0
 
