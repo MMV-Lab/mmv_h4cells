@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import csv
 from aicsimageio.writers import OmeTiffWriter
-from mmv_cell_analyzer._reader import napari_get_reader
+from mmv_h4cells._reader import napari_get_reader
 
 
 # tmp_path is a pytest fixture

@@ -76,7 +76,7 @@ def read_csv(path):  # adjust if needed if metrics are added
         []
     )  # List to store tuples of rows with the first element as an integer
     metrics = ()  # Tuple to store the metrics if its first element is a float
-    pixelsize = ()
+    # pixelsize = ()
     excluded = []
 
     with open(path, "r") as file:
@@ -98,7 +98,8 @@ def read_csv(path):  # adjust if needed if metrics are added
 
             if isinstance(row[0], str):
                 if row[0].startswith("ID"):
-                    excluded = json.loads(row[4])
+                    excluded = set(json.loads(row[4])) # Adjust indice if metrics are added
+                    undo_stack = json.loads(row[5])
                 continue
 
             # Check the type of the first element in the row
@@ -106,15 +107,16 @@ def read_csv(path):  # adjust if needed if metrics are added
                 data.append(tuple(row))
             elif isinstance(row[1], float):
                 # If the second element is a float, store the row separately
-                metrics = tuple(row)
-            elif isinstance(row[1], str):
-                pixelsize = tuple(row)
+                metrics = tuple(row[0:2])
+            # elif isinstance(row[1], str):
+            #     pixelsize = tuple(row)
 
     if metrics == ():
         # If the metric values happen to all be integers, they are now the last row of the data
         metrics = data.pop(-1)
 
-    return data, metrics, pixelsize, excluded
+    return data, metrics, excluded, undo_stack
+    # return data, metrics, pixelsize, excluded, undo_stack
 
 
 def read_tiff(path):
