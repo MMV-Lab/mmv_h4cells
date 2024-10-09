@@ -5,6 +5,7 @@ from aicsimageio.writers import OmeTiffWriter
 from pathlib import Path
 from qtpy.QtWidgets import QFileDialog
 import json
+import zarr
 
 
 def save_dialog(parent, filetype="*.csv", directory=""):
@@ -50,30 +51,35 @@ def get_writer(path: Path):
     if path.suffix == ".tiff":
         return write_tiff
 
+    if path.suffix == ".zarr":
+        return write_zarr
+
     return None
 
 
 def write_csv(
     path: Path,
     data: List[Tuple[int, int, Tuple[int, int]]],
-    metrics: Tuple[float, float],
+    metrics: Tuple[float, float, float],
     # pixelsize: Tuple[float, str],
-    excluded: Set[int],
-    undo_stack: List[int],
+    # excluded: Set[int],
+    # undo_stack: List[int],
 ):  # adjust if Metrics are added
     with open(path, "w", newline="") as file:
         csv_writer = csv.writer(file)
 
         csv_writer.writerow(
             ["ID", "Size [px]", "Centroid", ""]
-            + [json.dumps(list(excluded))]
-            + [json.dumps(undo_stack)]
+            # + [json.dumps(list(excluded))]
+            # + [json.dumps(undo_stack)]
         )  # , "metric name"
         for row in data:
             csv_writer.writerow(row)
 
         csv_writer.writerow([])
-        csv_writer.writerow(["Mean size [px]", "Std size [px]", "Threshold size [px]"])  # , "metric name"
+        csv_writer.writerow(
+            ["Mean size [px]", "Std size [px]", "Threshold size [px]"]
+        )  # , "metric name"
         csv_writer.writerow(metrics)
         # csv_writer.writerow([])
         # csv_writer.writerow(["1 pixel equals:"])
@@ -83,3 +89,45 @@ def write_csv(
 def write_tiff(path: Path, data: np.ndarray):
     data = data.astype(np.uint16)
     OmeTiffWriter.save(data, path, dim_order_out="YX")
+
+
+def write_zarr(
+    path: Path,
+    accepted_cells: np.ndarray,
+    rejected_cells: np.ndarray,
+    data: List[Tuple[int, int, Tuple[int, int]]],
+    metrics: Tuple[float, float],
+    undo_stack: List[int],
+):
+    zarr_file = zarr.open(str(path), mode="w")
+    zarr_file.create_dataset(
+        "accepted_cells",
+        shape=accepted_cells.shape,
+        dtype="i4",
+        data=accepted_cells,
+    )
+    zarr_file.create_dataset(
+        "rejected_cells",
+        shape=rejected_cells.shape,
+        dtype="i4",
+        data=rejected_cells,
+    )
+    flattened_data = [(id_, amount, centroid[0], centroid[1]) for id_, amount, centroid in data]
+    zarr_file.create_dataset(
+        "data",
+        shape=(len(data), 4),
+        dtype="i4",
+        data=flattened_data,
+    )
+    zarr_file.create_dataset(
+        "metrics",
+        shape=(len(metrics),),
+        dtype="f8",
+        data=metrics,
+    )
+    zarr_file.create_dataset(
+        "undo_stack",
+        shape=(len(undo_stack),),
+        dtype="i4",
+        data=undo_stack,
+    )

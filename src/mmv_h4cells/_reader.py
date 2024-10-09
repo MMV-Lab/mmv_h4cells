@@ -2,9 +2,10 @@ from qtpy.QtWidgets import QFileDialog
 import csv
 from aicsimageio import AICSImage
 import json
+import zarr
 
 
-def open_dialog(parent, filetype="*.csv", directory=""):
+def open_dialog(parent, filetype="*.csv", directory="", dir: bool = False):
     """
     Opens a dialog to select a file to open
 
@@ -23,9 +24,15 @@ def open_dialog(parent, filetype="*.csv", directory=""):
         Path of the selected file
     """
     dialog = QFileDialog()
-    filepath, _ = dialog.getOpenFileName(
-        parent, "Select CSV-File", directory, filetype, filetype
-    )
+    if dir:
+        filepath = dialog.getExistingDirectory(
+            parent, "Select Directory", directory=directory
+        )
+        return filepath
+    else:
+        filepath, _ = dialog.getOpenFileName(
+            parent, "Select CSV-File", directory, filetype, filetype
+        )
     return filepath
 
 
@@ -56,6 +63,9 @@ def napari_get_reader(path):
     # if path.endswith(".tiff")
     if path.suffix == ".tiff" or path.suffix == ".tif":
         return read_tiff
+    
+    if path.suffix == ".zarr":
+        return read_zarr
 
     return None
 
@@ -77,7 +87,7 @@ def read_csv(path):  # adjust if needed if metrics are added
     )  # List to store tuples of rows with the first element as an integer
     metrics = ()  # Tuple to store the metrics if its first element is a float
     # pixelsize = ()
-    excluded = []
+    # excluded = []
 
     with open(path, "r") as file:
         csv_reader = csv.reader(file)
@@ -98,8 +108,8 @@ def read_csv(path):  # adjust if needed if metrics are added
 
             if isinstance(row[0], str):
                 if row[0].startswith("ID"):
-                    excluded = set(json.loads(row[4])) # Adjust indice if metrics are added
-                    undo_stack = json.loads(row[5])
+                    # excluded = set(json.loads(row[4])) # Adjust indice if metrics are added
+                    undo_stack = json.loads(row[4])
                 continue
 
             # Check the type of the first element in the row
@@ -115,10 +125,20 @@ def read_csv(path):  # adjust if needed if metrics are added
         # If the metric values happen to all be integers, they are now the last row of the data
         metrics = data.pop(-1)
 
-    return data, metrics, excluded, undo_stack
+    return data, metrics, undo_stack
     # return data, metrics, pixelsize, excluded, undo_stack
 
 
 def read_tiff(path):
     data = AICSImage(path).get_image_data("YX")
     return data.astype("int32")
+
+def read_zarr(path):
+    zarr_file = zarr.open(path, mode="r")
+    accepted_cells = zarr_file["accepted_cells"][:]
+    rejected_cells = zarr_file["rejected_cells"][:]
+    flattened_data = zarr_file["data"][:]
+    data = [(id_, amount, (y, x)) for id_, amount, y, x in flattened_data]
+    metrics = zarr_file["metrics"][:]
+    undo_stack = zarr_file["undo_stack"][:]
+    return accepted_cells, rejected_cells, data, metrics, undo_stack

@@ -26,7 +26,7 @@ def analyse_roi(
     for id in ids:
         mask_id = cropped_mask == id
         y_id, x_id = np.where(mask_id)
-        centroid = (int(np.mean(y_id)), int(np.mean(x_id))) 
+        centroid = (int(np.mean(y_id)) + y[0], int(np.mean(x_id)) + x[0]) 
         centroids.append(centroid)     
 
     # Create dataframe
