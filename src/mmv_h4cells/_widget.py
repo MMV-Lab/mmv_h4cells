@@ -108,14 +108,18 @@ class CellAnalyzer(QWidget):
         def slot_layer_deleted(event):
             self.logger.debug("Layer deleted")
             if event.value in [self.current_cell_layer, self.layer_to_evaluate]:
-                readd_layer(event.value)
-        def readd_layer(layer):
+                layer = readd_layer(event.value.data, event.value.name)
+                if event.value.name == self.layer_to_evaluate.name:
+                    self.layer_to_evaluate = layer
+                else:
+                    self.current_cell_layer = layer
+        def readd_layer(data, name):
             self.logger.debug("Important layer removed")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
             msg.setText("Please don't remove this layer, we need it.")
             msg.exec_()
-            self.viewer.layers.append(layer)
+            return self.viewer.add_labels(data, name=name)
             
         self.viewer.layers.events.removed.connect(slot_layer_deleted)
 
