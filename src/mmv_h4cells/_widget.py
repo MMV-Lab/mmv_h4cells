@@ -176,6 +176,7 @@ class CellAnalyzer(QWidget):
         self.btn_include = QPushButton("Include")
         self.btn_exclude = QPushButton("Exclude")
         self.btn_undo = QPushButton("Undo")
+        self.btn_cancel = QPushButton("Cancel")
         self.btn_show_included = QPushButton("Show Included")
         self.btn_show_excluded = QPushButton("Show Excluded")
         self.btn_show_remaining = QPushButton("Show Remaining")
@@ -189,6 +190,7 @@ class CellAnalyzer(QWidget):
         self.btn_include.clicked.connect(self.include_on_click)
         self.btn_exclude.clicked.connect(self.exclude_on_click)
         self.btn_undo.clicked.connect(self.undo_on_click)
+        self.btn_cancel.clicked.connect(self.cancel_on_click)
         self.btn_show_included.clicked.connect(self.show_included_on_click)
         self.btn_show_excluded.clicked.connect(self.show_excluded_on_click)
         self.btn_show_remaining.clicked.connect(self.show_remaining_on_click)
@@ -219,6 +221,7 @@ class CellAnalyzer(QWidget):
         self.btn_include.setEnabled(False)
         self.btn_exclude.setEnabled(False)
         self.btn_undo.setEnabled(False)
+        self.btn_cancel.setVisible(False)
         self.btn_show_included.setEnabled(False)
         self.btn_show_excluded.setEnabled(False)
         self.btn_show_remaining.setEnabled(False)
@@ -321,6 +324,7 @@ class CellAnalyzer(QWidget):
 
         content.layout().addWidget(self.btn_exclude, 5, 0, 1, 1)
         content.layout().addWidget(self.btn_undo, 5, 1, 1, 1)
+        content.layout().addWidget(self.btn_cancel, 5, 1, 1, 1)
         content.layout().addWidget(self.btn_include, 5, 2, 1, 1)
 
         content.layout().addWidget(label_included, 6, 0, 1, 1)
@@ -646,6 +650,18 @@ class CellAnalyzer(QWidget):
         # write(tiff_filepath_rejected, self.rejected_cells)
 
     def include_on_click(self, self_drawn=False):
+        """
+        Includes the current cell in the analysis.
+        
+        Parameters
+        ----------
+        self_drawn : bool, optional
+            Whether the cell was drawn by the user, by default False
+            
+        Returns
+        -------
+        bool
+            Whether the cell was included successfully"""
         self.logger.debug("Including cell...")
         starttime_abs = time.time()
         if len(self.remaining) < 1:
@@ -654,10 +670,10 @@ class CellAnalyzer(QWidget):
             msg.setWindowTitle("napari")
             msg.setText("No remaining cells")
             msg.exec_()
-            return
+            return False
 
         if self.check_for_overlap():
-            return
+            return False
 
         endtime = time.time()
         self.logger.debug(f"Runtime overlap check: {endtime - starttime_abs}")
@@ -670,7 +686,7 @@ class CellAnalyzer(QWidget):
                 "More than one label detected in current cell layer. Please remove the added label."
             )
             msg.exec_()
-            return
+            return False
         endtime = time.time()
         self.logger.debug(f"Runtime multiple ids check: {endtime - starttime}")
         starttime = time.time()
@@ -692,6 +708,7 @@ class CellAnalyzer(QWidget):
             )
         endtime_abs = time.time()
         self.logger.debug(f"Runtime complete: {endtime_abs - starttime_abs}")
+        return True
 
     def exclude_on_click(self):
         self.logger.debug("Excluding cell...")
@@ -763,6 +780,16 @@ class CellAnalyzer(QWidget):
             self.display_next_cell(True)
         else:
             self.redisplay_current_cell()
+
+    def cancel_on_click(self):
+        self.logger.debug("Cancelling draw own cell...")
+        self.btn_include.setEnabled(True)
+        self.btn_exclude.setEnabled(True)
+        self.btn_undo.setVisible(True)
+        self.btn_cancel.setVisible(False)
+        self.current_cell_layer.mode = "pan_zoom"
+        self.btn_segment.setText("Draw own cell")
+        self.display_next_cell()
 
     def show_included_on_click(self):
         if self.btn_show_included.text() == "Show Included":
@@ -975,7 +1002,11 @@ class CellAnalyzer(QWidget):
     def draw_own_cell(self):
         if self.btn_segment.text() == "Draw own cell":
             self.logger.debug("Draw own cell initialized")
-            self.btn_segment.setText("Confirm/Back")
+            self.btn_segment.setText("Confirm")
+            self.btn_exclude.setEnabled(False)
+            self.btn_include.setEnabled(False)
+            self.btn_undo.setVisible(False)
+            self.btn_cancel.setVisible(True)
             # Set next id label to current cell layer id
             current_id = str(np.max(self.current_cell_layer.data))
             self.lineedit_next_id.setText(current_id)
@@ -998,8 +1029,19 @@ class CellAnalyzer(QWidget):
         else:
             self.logger.debug("Draw own cell confirmed")
             self.current_cell_layer.mode = "pan_zoom"
-            self.include_on_click(True)
-            self.btn_segment.setText("Draw own cell")
+            if len(pd.unique(self.current_cell_layer.data.flatten())) < 2:
+                self.logger.debug("No label drawn")
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText("No cell annotated.")
+                msg.exec_()
+                return
+            if self.include_on_click(True):
+                self.btn_segment.setText("Draw own cell")
+                self.btn_exclude.setEnabled(True)
+                self.btn_include.setEnabled(True)
+                self.btn_undo.setVisible(True)
+                self.btn_cancel.setVisible(False)
 
     def display_next_cell(self, ignore_jump_back: bool = False):
         self.logger.debug("Displaying next cell...")
@@ -1197,11 +1239,11 @@ class CellAnalyzer(QWidget):
         """
         self.logger.debug("Calculating overlap...")
         nonzero_current = np.nonzero(self.current_cell_layer.data)
-        accepted_cells = np.copy(self.accepted_cells)
-        nonzero_accepted = np.nonzero(accepted_cells)
+        eval_cells = np.copy(self.layer_to_evaluate.data)
+        nonzero_eval = np.nonzero(eval_cells)
         combined_layer = np.zeros_like(self.layer_to_evaluate.data)
         combined_layer[nonzero_current] += 1
-        combined_layer[nonzero_accepted] += 1
+        combined_layer[nonzero_eval] += 1
         overlap = set(map(tuple, np.transpose(np.where(combined_layer == 2))))
         return overlap
 
