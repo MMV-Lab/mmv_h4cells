@@ -104,6 +104,20 @@ class CellAnalyzer(QWidget):
             if isinstance(layer, Labels):
                 self.set_label_layer(layer)
                 break
+        
+        def slot_layer_deleted(event):
+            self.logger.debug("Layer deleted")
+            if event.value in [self.current_cell_layer, self.layer_to_evaluate]:
+                readd_layer(event.value)
+        def readd_layer(layer):
+            self.logger.debug("Important layer removed")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("Please don't remove this layer, we need it.")
+            msg.exec_()
+            self.viewer.layers.append(layer)
+            
+        self.viewer.layers.events.removed.connect(slot_layer_deleted)
 
         self.logger.debug("CellAnalyzer initialized")
         self.logger.info("Ready to use")
@@ -442,6 +456,7 @@ class CellAnalyzer(QWidget):
 
     def start_analysis_on_click(self):
         self.logger.debug("Analysis started...")
+        starttime = time.time()
         try:
             start_id = int(self.lineedit_next_id.text())
         except ValueError:
@@ -471,6 +486,7 @@ class CellAnalyzer(QWidget):
         self.btn_include_multiple.setEnabled(True)
         self.label_next_id.setText("Next cell:")
         self.layer_to_evaluate.opacity = 0.3
+
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.layer_to_evaluate.data), name="Current Cell"
         )
@@ -489,6 +505,8 @@ class CellAnalyzer(QWidget):
         )
         # start iterating through ids to create label layer for and zoom into centroid of label
         self.display_cell(start_id)
+        endtime = time.time()
+        self.logger.debug(f"Runtime start analysis: {endtime - starttime}")
 
     def display_cell(self, cell_id: int):
         self.logger.debug(f"Displaying cell {cell_id}")
@@ -1240,6 +1258,8 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Calculating overlap...")
         nonzero_current = np.nonzero(self.current_cell_layer.data)
         eval_cells = np.copy(self.layer_to_evaluate.data)
+        id_ = self.current_cell_layer.selected_label
+        eval_cells[eval_cells == id_] = 0
         nonzero_eval = np.nonzero(eval_cells)
         combined_layer = np.zeros_like(self.layer_to_evaluate.data)
         combined_layer[nonzero_current] += 1
