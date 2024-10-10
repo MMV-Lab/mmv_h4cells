@@ -937,7 +937,7 @@ class CellAnalyzer(QWidget):
             self.logger.debug("Invalid input")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
-            msg.setText("Please enter a comma separated list of integers.")
+            msg.setText("Please enter a comma separated list of integers, for example '1, 5, 2, 8, 199, 5000'.")
             msg.exec_()
             return None
         return ids
