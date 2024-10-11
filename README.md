@@ -52,7 +52,7 @@ The analysis can be started by clicking on the "Start analysis" button. The next
 
 When an instance is included, the respective instance is written to a segmentation layer, which can be exported using the export function. In addition, the ID, the size and the centroid are exported as a .csv file. We also export a .zarr file, which makes it possible to re-import previously exported results, for example to pause the analysis. To enable a smooth re-import, the .csv and the .zarr file must have the same name stem, so please either do not rename the files or rename them in the same way. 
 
-For a better overview, the included/excluded/remaining instances can be viewed using the buttons at the bottom. For more information, see the "Don'ts" section. Additionally, the microscopic resolution can be specified as an option.
+For a better overview, the included/excluded/remaining instances can be viewed using the buttons at the bottom.
 
 #### Select multiple cells
 
@@ -60,7 +60,7 @@ We also support the option of including several cells at once. To do so, the res
 
 #### Select ROI
 
-
+Entire ROIs can also be analyzed. To do this, simply enter the corner pixels in the "Range x" and "Range y" fields. All cells > the threshold are included; if, for example, cells that lie exactly at the edge of the ROI and are partially cut off are to be excluded, a corresponding threshold must be set.
 
 ### Hotkeys
 
