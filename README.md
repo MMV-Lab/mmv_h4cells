@@ -64,10 +64,10 @@ We also support the option of including several cells at once. To do so, the res
 
 ### Hotkeys
 
-- `j` - Include
-- `f` - Exclude
-- `v` - Change visibility of all label layers for better inspection
-- `b` - Undo
+- `k` - Include
+- `g` - Exclude
+- `j` - Change visibility of all label layers for better inspection
+- `h` - Undo
 
 ### Don'ts
 
