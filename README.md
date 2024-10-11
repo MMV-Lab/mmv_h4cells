@@ -62,6 +62,8 @@ We also support the option of including several cells at once. To do so, the res
 
 Entire ROIs can also be analyzed. To do this, simply enter the corner pixels in the "Range x" and "Range y" fields. All cells > the threshold are included; if, for example, cells that lie exactly at the edge of the ROI and are partially cut off are to be excluded, a corresponding threshold must be set.
 
+Note: Exported ROIs cannot be re-imported.
+
 ### Hotkeys
 
 - `k` - Include
