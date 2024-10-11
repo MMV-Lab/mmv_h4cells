@@ -12,13 +12,16 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QMessageBox,
     QGroupBox,
+    QDialog,
 )
+from qtpy.QtCore import QEvent
 
 import napari
 import numpy as np
 import pandas as pd
 from typing import List, Tuple, Set
 from pathlib import Path
+from mmv_h4cells import __version__ as version
 from mmv_h4cells._reader import open_dialog, read
 from mmv_h4cells._roi import analyse_roi
 from mmv_h4cells._writer import save_dialog, write
@@ -33,7 +36,9 @@ class CellAnalyzer(QWidget):
         super().__init__()
         self.viewer = viewer
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)  # TODO: change to INFO for release
+        self.logger.setLevel(
+            logging.DEBUG
+        )  # TODO: change to ERROR for release
         self.logger.propagate = False
         for handler in self.logger.handlers[:]:
             self.logger.removeHandler(handler)
@@ -89,14 +94,21 @@ class CellAnalyzer(QWidget):
         # Hotkeys
 
         hotkeys = self.viewer.keymap.keys()
+        self.logger.debug(f"Current hotkeys: {hotkeys}")
         custom_binds = [
-            ("J", self.on_hotkey_include),
-            ("F", self.on_hotkey_exclude),
-            ("B", self.on_hotkey_undo),
-            ("V", self.toggle_visibility_label_layers_hotkey),
+            ("K", self.on_hotkey_include),
+            ("G", self.on_hotkey_exclude),
+            ("H", self.on_hotkey_undo),
+            ("J", self.toggle_visibility_label_layers_hotkey),
         ]
         for custom_bind in custom_binds:
-            if not custom_bind[0] in hotkeys:
+            napari_ver = napari.__version__.split(".")
+            if napari_ver[0] == 0 and napari_ver[1] < "5":
+                condition = custom_bind[0] in hotkeys
+            else:
+                custom_bind_keys = [bind.to_text() for bind in self.viewer.keymap]
+                condition = custom_bind[0] in custom_bind_keys
+            if not condition:
                 viewer.bind_key(*custom_bind)
 
         self.viewer.layers.events.inserted.connect(self.get_label_layer)
@@ -104,15 +116,14 @@ class CellAnalyzer(QWidget):
             if isinstance(layer, Labels):
                 self.set_label_layer(layer)
                 break
-        
-        def slot_layer_deleted(event):
-            self.logger.debug("Layer deleted")
-            if event.value in [self.current_cell_layer, self.layer_to_evaluate]:
-                layer = readd_layer(event.value.data, event.value.name)
-                if event.value.name == self.layer_to_evaluate.name:
-                    self.layer_to_evaluate = layer
-                else:
-                    self.current_cell_layer = layer
+
+        self.viewer.layers.events.removed.connect(self.slot_layer_deleted)
+        self.installEventFilter(self)
+
+        self.logger.debug(f"CellAnalyzer v{version} initialized")
+        self.logger.info("Ready to use")
+
+    def slot_layer_deleted(self, event):
         def readd_layer(data, name):
             self.logger.debug("Important layer removed")
             msg = QMessageBox()
@@ -120,11 +131,22 @@ class CellAnalyzer(QWidget):
             msg.setText("Please don't remove this layer, we need it.")
             msg.exec_()
             return self.viewer.add_labels(data, name=name)
-            
-        self.viewer.layers.events.removed.connect(slot_layer_deleted)
 
-        self.logger.debug("CellAnalyzer initialized")
-        self.logger.info("Ready to use")
+        self.logger.debug("Layer deleted")
+        if event.value in [self.current_cell_layer, self.layer_to_evaluate]:
+            layer = readd_layer(event.value.data, event.value.name)
+            if event.value.name == self.layer_to_evaluate.name:
+                self.layer_to_evaluate = layer
+            else:
+                self.current_cell_layer = layer
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Hide:
+            self.viewer.layers.events.inserted.disconnect(self.get_label_layer)
+            self.viewer.layers.events.removed.disconnect(
+                self.slot_layer_deleted
+            )
+        return super().eventFilter(source, event)
 
     def on_hotkey_include(self, _):
         if self.btn_include.isEnabled():
@@ -225,13 +247,13 @@ class CellAnalyzer(QWidget):
             "Import previously exported mask and analysis csv to continue analysis"
         )
         self.btn_include.setToolTip(
-            'Include checked cell. Instead of clicking this button, you can also press the "J" key.'
+            'Include checked cell. Instead of clicking this button, you can also press the "K" key.'
         )
         self.btn_exclude.setToolTip(
-            'Exclude checked cell. Instead of clicking this button, you can also press the "F" key.'
+            'Exclude checked cell. Instead of clicking this button, you can also press the "G" key.'
         )
         self.btn_undo.setToolTip(
-            'Undo last selection. Instead of clicking this button, you can also press the "B" key.'
+            'Undo last selection. Instead of clicking this button, you can also press the "H" key.'
         )
 
         self.btn_start_analysis.setEnabled(False)
@@ -393,16 +415,18 @@ class CellAnalyzer(QWidget):
 
     def get_label_layer(self, event):
         self.logger.debug("New potential label layer detected...")
-        if not (
-            self.layer_to_evaluate is None and isinstance(event.value, Labels)
-        ):
-            self.logger.debug("New layer invalid or already set")
+        if not self.layer_to_evaluate is None:
+            self.logger.debug("Label layer already set")
+            return
+        if not isinstance(event.value, Labels):
+            self.logger.debug("New layer invalid")
             return
         self.logger.debug("Label layer is valid")
         self.set_label_layer(event.value)
 
     def set_label_layer(self, layer):
         self.logger.debug("Setting label layer...")
+        starttime = time.time()
         self.layer_to_evaluate = layer
         self.btn_start_analysis.setEnabled(True)
         unique_ids = np.unique(self.layer_to_evaluate.data)
@@ -437,6 +461,8 @@ class CellAnalyzer(QWidget):
         )
         self.logger.debug("Sets updated")
         self.update_labels()
+        endtime = time.time()
+        self.logger.debug(f"Runtime set label layer: {endtime - starttime}")
 
     def update_labels(self):
         self.logger.debug("Updating labels...")
@@ -460,6 +486,16 @@ class CellAnalyzer(QWidget):
 
     def start_analysis_on_click(self):
         self.logger.debug("Analysis started...")
+        label_layers = [
+            layer.name for layer in self.viewer.layers if isinstance(layer, Labels)
+        ]
+        if len(label_layers) > 1:
+            dialog = ChoiceDialog(label_layers, self.layer_to_evaluate.name)
+            choice = dialog.exec_()
+            if choice >= 0:
+                layer = self.viewer.layers[label_layers[choice]]
+                self.set_label_layer(layer)
+        self.logger.debug(f"Using label layer: {self.layer_to_evaluate.name}")
         starttime = time.time()
         try:
             start_id = int(self.lineedit_next_id.text())
@@ -591,7 +627,7 @@ class CellAnalyzer(QWidget):
         # ) = read(csv_filepath)
         self.mean_size, self.std_size = metrics  # , self.metric_value = ...
         self.metric_data = data
-        self.undo_stack = undo_stack
+        self.undo_stack = undo_stack.tolist()
         # (
         #     self.lineedit_conversion_rate.setText(str(pixelsize[0]))
         #     if pixelsize[1] != "pixel"
@@ -674,12 +710,12 @@ class CellAnalyzer(QWidget):
     def include_on_click(self, self_drawn=False):
         """
         Includes the current cell in the analysis.
-        
+
         Parameters
         ----------
         self_drawn : bool, optional
             Whether the cell was drawn by the user, by default False
-            
+
         Returns
         -------
         bool
@@ -986,7 +1022,9 @@ class CellAnalyzer(QWidget):
             self.logger.debug("Invalid input")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
-            msg.setText("Please enter a comma separated list of integers, for example '1, 5, 2, 8, 199, 5000'.")
+            msg.setText(
+                "Please enter a comma separated list of integers, for example '1, 5, 2, 8, 199, 5000'."
+            )
             msg.exec_()
             return None
         return ids
@@ -1472,3 +1510,25 @@ class CellAnalyzer(QWidget):
         msg.setWindowTitle("napari")
         msg.setText("ROI data exported.")
         msg.exec_()
+
+
+class ChoiceDialog(QDialog):
+    def __init__(self, layernames: list[str], selected: str):
+        super().__init__()
+        self.setWindowTitle("Choose Label Layer")
+        self.combobox = QComboBox()
+        self.combobox.addItems(layernames)
+        self.combobox.setCurrentText(selected)
+        btn_select = QPushButton("Select")
+        btn_select.clicked.connect(self.accept)
+        layout = QVBoxLayout()
+        layout.addWidget(self.combobox)
+        layout.addWidget(btn_select)
+        self.setLayout(layout)
+        self.setMinimumSize(250, 100)
+
+    def accept(self):
+        self.done(self.combobox.currentIndex())
+
+    def reject(self):
+        self.done(-1)
