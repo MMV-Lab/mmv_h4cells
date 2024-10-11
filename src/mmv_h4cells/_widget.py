@@ -431,25 +431,10 @@ class CellAnalyzer(QWidget):
         self.btn_start_analysis.setEnabled(True)
         unique_ids = np.unique(self.layer_to_evaluate.data)
         self.logger.debug(f"{len(unique_ids)} unique ids found")
-        self.selfdrawn_lower_bound = max(unique_ids) + 1
-        if len(self.metric_data) > 0:
-            max_id = max(
-                np.max(self.accepted_cells), np.max(self.rejected_cells)
-            )
-            self.logger.debug(f"Highest evaluated id: {max_id}")
-            self.remaining = set(unique_ids) - (
-                self.included | self.excluded | {0}
-            )
-            labels = self.layer_to_evaluate.data - self.rejected_cells
+        if self.selfdrawn_lower_bound is None:
+            self.selfdrawn_lower_bound = max(unique_ids) + 1
 
-            labels = np.where(
-                self.accepted_cells >= self.selfdrawn_lower_bound,
-                labels + self.accepted_cells,
-                labels,
-            )
-            self.layer_to_evaluate.data = labels
-        else:
-            max_id = 0
+        if len(self.metric_data) == 0:
             self.accepted_cells = np.zeros_like(self.layer_to_evaluate.data)
             self.rejected_cells = np.zeros_like(self.layer_to_evaluate.data)
             self.remaining = set(unique_ids) - {0}
@@ -469,20 +454,8 @@ class CellAnalyzer(QWidget):
         self.label_amount_excluded.setText(str(len(self.excluded)))
         self.label_amount_included.setText(str(len(self.included)))
         self.label_amount_remaining.setText(str(len(self.remaining)))
-        # if self.lineedit_conversion_rate.text().strip() == "":
-        #     unit = "pixel"
-        #     factor = 1
-        # else:
-        #     unit = self.combobox_conversion_unit.currentText() + "²"
-        #     factor = float(self.lineedit_conversion_rate.text())
-        # self.logger.debug(f"Conversion rate: {factor} {unit}")
         self.label_mean_included.setText(str(self.mean_size))
         self.label_std_included.setText(str(self.std_size))
-        # self.label_mean_included.setText(
-        #     f"{str(self.mean_size*factor)} {unit}"
-        # )
-        # self.label_std_included.setText(f"{str(self.std_size*factor)} {unit}")
-        # self.label_metric.included.setText(new value)
 
     def start_analysis_on_click(self):
         self.logger.debug("Analysis started...")
@@ -565,7 +538,7 @@ class CellAnalyzer(QWidget):
         self.viewer.camera.zoom = 7.5  # !!
         self.current_cell_layer.selected_label = cell_id
 
-    def import_on_click(self):  # TODO: change to .zarr
+    def import_on_click(self):
         self.logger.debug("Importing data...")
         csv_filepath = Path(open_dialog(self))
         if str(csv_filepath) == ".":
@@ -573,7 +546,7 @@ class CellAnalyzer(QWidget):
             return
         zarr_filepath = csv_filepath.with_suffix(".zarr")
         try:
-            accepted_cells, rejected_cells, data, metrics, undo_stack = read(
+            data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, self.selfdrawn_lower_bound = read(
                 zarr_filepath
             )
         except FileNotFoundError:
@@ -581,89 +554,36 @@ class CellAnalyzer(QWidget):
             if str(zarr_filepath) == ".":
                 self.logger.debug("No zarr file selected. Aborting.")
                 return
-            accepted_cells, rejected_cells, data, metrics, undo_stack = read(
+            data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, self.selfdrawn_lower_bound = read(
                 zarr_filepath
             )
-        # tiff_filepath = csv_filepath.with_suffix(".tiff")
-        # try:
-        #     accepted_cells = read(tiff_filepath)
-        # except FileNotFoundError:
-        #     tiff_filepath = tiff_filepath.with_suffix(".tif")
-        #     try:
-        #         accepted_cells = read(tiff_filepath)
-        #     except FileNotFoundError:
-        #         tiff_filepath = Path(
-        #             open_dialog(self, filetype="*.tiff *.tif")
-        #         )
-        #         if str(tiff_filepath) == ".":
-        #             self.logger.debug("No tiff file selected. Aborting.")
-        #             return
-        #         accepted_cells = read(tiff_filepath)
-        # try:
-        #     rejected_path = tiff_filepath.with_stem(
-        #         tiff_filepath.stem + "_rejected"
-        #     )
-        #     rejected_cells = read(rejected_path)
-        # except FileNotFoundError:
-        #     tiff_filepath_rejected = rejected_path.with_suffix(".tif")
-        #     try:
-        #         rejected_cells = read(tiff_filepath_rejected)
-        #     except FileNotFoundError:
-        #         tiff_filepath_rejected = Path(
-        #             open_dialog(self, filetype="*.tiff *.tif")
-        #         )
-        #         if str(tiff_filepath_rejected) == ".":
-        #             self.logger.debug("No tiff file selected. Aborting.")
-        #             return
-        #         rejected_cells = read(tiff_filepath_rejected)
+        self.logger.debug(f"Minimum id: {min(pd.unique(data_to_evaluate.flatten()))}, Maximum id: {max(pd.unique(data_to_evaluate.flatten()))}")
         self.accepted_cells = accepted_cells
         self.rejected_cells = rejected_cells
-        # (
-        #     self.metric_data,
-        #     metrics,
-        #     # pixelsize,
-        #     # self.excluded,
-        #     self.undo_stack,
-        # ) = read(csv_filepath)
         self.mean_size, self.std_size = metrics  # , self.metric_value = ...
-        self.metric_data = data
         self.undo_stack = undo_stack.tolist()
-        # (
-        #     self.lineedit_conversion_rate.setText(str(pixelsize[0]))
-        #     if pixelsize[1] != "pixel"
-        #     else self.lineedit_conversion_rate.setText("")
-        # )
-        # self.combobox_conversion_unit.setCurrentText(pixelsize[1])
         self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
         self.excluded = set(pd.unique(self.rejected_cells.flatten())) - {0}
         self.btn_export.setEnabled(True)
+        self.metric_data = data
 
-        if not self.layer_to_evaluate is None:
-            self.logger.debug("Adjusting label layer")
-            self.selfdrawn_lower_bound = (
-                max(np.unique(self.layer_to_evaluate.data)) + 1
-            )
-            labels = self.layer_to_evaluate.data - self.rejected_cells
-            labels = np.where(
-                self.accepted_cells >= self.selfdrawn_lower_bound,
-                labels + self.accepted_cells,
-                labels,
-            )
-            self.layer_to_evaluate.data = labels
-            self.logger.debug("Filling in values for existing label layer")
-            unique_ids = pd.unique(self.layer_to_evaluate.data.flatten())
-            self.remaining = set(unique_ids) - (
-                self.included | self.excluded | {0}
-            )
-            next_id = (
-                str(min(self.remaining)) if len(self.remaining) > 0 else ""
-            )
-            self.lineedit_next_id.setText(next_id)
-            self.btn_start_analysis.setEnabled(True)
+        layer = self.viewer.add_labels(data_to_evaluate, name="Imported Data")
+        self.set_label_layer(layer)
+
+        self.logger.debug("Filling in values for imported data")
+        unique_ids = pd.unique(self.layer_to_evaluate.data.flatten())
+        self.remaining = set(unique_ids) - (
+            self.included | self.excluded | {0}
+        )
+        next_id = (
+            str(min(self.remaining)) if len(self.remaining) > 0 else ""
+        )
+        self.lineedit_next_id.setText(next_id)
+        self.btn_start_analysis.setEnabled(True)
 
         self.update_labels()
 
-    def export_on_click(self):  # TODO: change to .zarr
+    def export_on_click(self):
         self.logger.debug("Exporting data...")
         csv_filepath = Path(save_dialog(self))
         if csv_filepath.name == ".csv":
@@ -671,41 +591,26 @@ class CellAnalyzer(QWidget):
             return
         zarr_filepath = csv_filepath.with_suffix(".zarr")
         tiff_filepath = csv_filepath.with_suffix(".tiff")
-        # tiff_filepath_rejected = tiff_filepath.with_stem(tiff_filepath.stem + "_rejected")
-        # if self.lineedit_conversion_rate.text() == "":
-        #     factor = 1
-        #     unit = "pixel"
-        # else:
-        #     factor = float(
-        #         self.lineedit_conversion_rate.text()
-        #     )  # TODO: catch ValueError if not float
-        #     unit = self.combobox_conversion_unit.currentText()
         self.metric_data = sorted(self.metric_data, key=lambda x: x[0])
         write(
             csv_filepath,
             self.metric_data,
             (self.mean_size, self.std_size, 0),
-            # (
-            #     factor,
-            #     unit,
-            #     # self.combobox_conversion_unit.currentText(),
-            # ),
-            # self.excluded,
-            # self.undo_stack,
         )
         self.logger.debug("Metrics written to csv")
         write(tiff_filepath, self.accepted_cells)
         self.logger.debug("Accepted cells written to tiff")
         write(
             zarr_filepath,
+            self.layer_to_evaluate.data,
             self.accepted_cells,
             self.rejected_cells,
             self.metric_data,
             (self.mean_size, self.std_size),
             self.undo_stack,
+            self.selfdrawn_lower_bound,
         )
         self.logger.debug("Data written to zarr")
-        # write(tiff_filepath_rejected, self.rejected_cells)
 
     def include_on_click(self, self_drawn=False):
         """
@@ -1190,79 +1095,6 @@ class CellAnalyzer(QWidget):
             self.lineedit_next_id.setText("")
             self.next_id = None
         self.logger.debug("Value for next cell set")
-
-    # def display_next_cell_old(self, check_lowered=True):
-    #     self.logger.debug("Displaying next cell...")
-    #     if len(self.remaining) < 1:
-    #         self.logger.debug("No cells left to evaluate")
-    #         msg = QMessageBox()
-    #         msg.setWindowTitle("napari")
-    #         msg.setText("No more cells to evaluate.")
-    #         msg.exec_()
-    #         return
-
-    #     given_id = int(self.lineedit_next_id.text())
-    #     self.logger.debug(f"Id given by textfield: {given_id}")
-    #     last_evaluated_id = (
-    #         self.undo_stack[-1] if len(self.undo_stack) > 0 else 0
-    #     )
-    #     self.logger.debug(f"Last evaluated id: {last_evaluated_id}")
-    #     candidate_ids = sorted(
-    #         [i for i in self.remaining if i > last_evaluated_id]
-    #     )
-    #     next_id_computed = (
-    #         candidate_ids[0] if len(candidate_ids) > 0 else min(self.remaining)
-    #     )
-    #     self.logger.debug(f"Computed next id: {next_id_computed}")
-
-    #     if given_id != next_id_computed:
-    #         if given_id not in self.remaining:
-    #             msg = QMessageBox()
-    #             msg.setWindowTitle("napari")
-    #             msg.setText("Given id is not in remaining cells.")
-    #             msg.exec_()
-    #             candidate_ids = sorted(
-    #                 [i for i in self.remaining if i < given_id]
-    #             )
-    #             if len(candidate_ids) > 0:
-    #                 self.logger.debug("Using highest lower id")
-    #                 next_id = candidate_ids[-1]
-    #             else:
-    #                 self.logger.debug("Using lowest remaining id")
-    #                 next_id = min(self.remaining)
-    #         else:
-    #             self.logger.debug("Using given id (not computed)")
-    #             next_id = given_id
-    #     else:
-    #         self.logger.debug("Using given id (computed)")
-    #         next_id = given_id
-
-    #     if not check_lowered:
-    #         self.logger.debug("Skipping check for lowered id")
-
-    #     if check_lowered and next_id < last_evaluated_id:
-    #         self.logger.debug("Next id lower than last evaluated id")
-    #         msg = QMessageBox()
-    #         msg.setWindowTitle("napari")
-    #         if next_id_computed < last_evaluated_id:
-    #             self.logger.debug("No higher id remaining")
-    #             msg.setText("Dataset is finished. Jumping to earlier cells.")
-    #         else:
-    #             self.logger.debug("Higher id is remaining")
-    #             msg.setText("Lowering the next cell id is a bad idea.")
-    #         msg.exec_()
-    #     self.display_cell(next_id)
-
-    #     if len(self.remaining) > 1:
-    #         candidate_ids = sorted([i for i in self.remaining if i > next_id])
-    #         if len(candidate_ids) > 0:
-    #             next_label = candidate_ids[0]
-    #         else:
-    #             next_label = min(self.remaining)
-    #         self.lineedit_next_id.setText(str(next_label))
-    #     else:
-    #         self.lineedit_next_id.setText("")
-    #     self.logger.debug("Value for next cell set")
 
     def include(
         self,

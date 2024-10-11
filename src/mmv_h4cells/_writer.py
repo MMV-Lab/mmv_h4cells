@@ -93,13 +93,21 @@ def write_tiff(path: Path, data: np.ndarray):
 
 def write_zarr(
     path: Path,
+    data_to_evaluate: np.ndarray,
     accepted_cells: np.ndarray,
     rejected_cells: np.ndarray,
     data: List[Tuple[int, int, Tuple[int, int]]],
     metrics: Tuple[float, float],
     undo_stack: List[int],
+    selfdrawn_lower_bound: int,
 ):
     zarr_file = zarr.open(str(path), mode="w")
+    zarr_file.create_dataset(
+        "data_to_valuate",
+        shape=data_to_evaluate.shape,
+        dtype="i4",
+        data=data_to_evaluate,
+    )
     zarr_file.create_dataset(
         "accepted_cells",
         shape=accepted_cells.shape,
@@ -131,3 +139,4 @@ def write_zarr(
         dtype="i4",
         data=undo_stack,
     )
+    zarr_file.attrs["selfdrawn_lower_bound"] = selfdrawn_lower_bound

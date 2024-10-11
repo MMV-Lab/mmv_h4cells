@@ -135,10 +135,12 @@ def read_tiff(path):
 
 def read_zarr(path):
     zarr_file = zarr.open(path, mode="r")
+    data_to_evaluate = zarr_file["data_to_valuate"][:]
     accepted_cells = zarr_file["accepted_cells"][:]
     rejected_cells = zarr_file["rejected_cells"][:]
     flattened_data = zarr_file["data"][:]
     data = [(id_, amount, (y, x)) for id_, amount, y, x in flattened_data]
     metrics = zarr_file["metrics"][:]
     undo_stack = zarr_file["undo_stack"][:]
-    return accepted_cells, rejected_cells, data, metrics, undo_stack
+    selfdrawn_lower_bound = zarr_file.attrs["selfdrawn_lower_bound"]
+    return data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, selfdrawn_lower_bound
