@@ -1,10 +1,10 @@
 import numpy as np
 import csv
-from typing import List, Tuple, Set
+import locale
+from typing import List, Tuple
 from aicsimageio.writers import OmeTiffWriter
 from pathlib import Path
 from qtpy.QtWidgets import QFileDialog
-import json
 import zarr
 
 
@@ -61,17 +61,18 @@ def write_csv(
     path: Path,
     data: List[Tuple[int, int, Tuple[int, int]]],
     metrics: Tuple[float, float, float],
-    # pixelsize: Tuple[float, str],
-    # excluded: Set[int],
-    # undo_stack: List[int],
 ):  # adjust if Metrics are added
+    default_locale = locale.getdefaultlocale()[0]
+    if default_locale.startswith("de"):
+        data = [convert_np64_to_string(sublist) for sublist in data]
+        delimiter = ";"
+    else:
+        delimiter = ","
     with open(path, "w", newline="") as file:
-        csv_writer = csv.writer(file)
+        csv_writer = csv.writer(file, delimiter=delimiter)
 
         csv_writer.writerow(
             ["ID", "Size [px]", "Centroid", ""]
-            # + [json.dumps(list(excluded))]
-            # + [json.dumps(undo_stack)]
         )  # , "metric name"
         for row in data:
             csv_writer.writerow(row)
@@ -81,9 +82,15 @@ def write_csv(
             ["Mean size [px]", "Std size [px]", "Threshold size [px]"]
         )  # , "metric name"
         csv_writer.writerow(metrics)
-        # csv_writer.writerow([])
-        # csv_writer.writerow(["1 pixel equals:"])
-        # csv_writer.writerow(pixelsize)
+
+def convert_np64_to_string(sublist):
+    converted_sublist = []
+    for item in sublist:
+        if isinstance(item, np.float64):
+            converted_sublist.append(str(item).replace(".", ","))
+        else:
+            converted_sublist.append(item)
+    return converted_sublist
 
 
 def write_tiff(path: Path, data: np.ndarray):

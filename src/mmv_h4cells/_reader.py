@@ -70,7 +70,7 @@ def napari_get_reader(path):
     return None
 
 
-def read_csv(path):  # adjust if needed if metrics are added
+def read_csv(path):  # adjust if needed if metrics are added # unused
     """
     Reads data from a CSV file and processes each row.
 
@@ -86,8 +86,6 @@ def read_csv(path):  # adjust if needed if metrics are added
         []
     )  # List to store tuples of rows with the first element as an integer
     metrics = ()  # Tuple to store the metrics if its first element is a float
-    # pixelsize = ()
-    # excluded = []
 
     with open(path, "r") as file:
         csv_reader = csv.reader(file)
@@ -108,7 +106,6 @@ def read_csv(path):  # adjust if needed if metrics are added
 
             if isinstance(row[0], str):
                 if row[0].startswith("ID"):
-                    # excluded = set(json.loads(row[4])) # Adjust indice if metrics are added
                     undo_stack = json.loads(row[4])
                 continue
 
@@ -118,18 +115,15 @@ def read_csv(path):  # adjust if needed if metrics are added
             elif isinstance(row[1], float):
                 # If the second element is a float, store the row separately
                 metrics = tuple(row[0:2])
-            # elif isinstance(row[1], str):
-            #     pixelsize = tuple(row)
 
     if metrics == ():
         # If the metric values happen to all be integers, they are now the last row of the data
         metrics = data.pop(-1)
 
     return data, metrics, undo_stack
-    # return data, metrics, pixelsize, excluded, undo_stack
 
 
-def read_tiff(path):
+def read_tiff(path): # unused
     data = AICSImage(path).get_image_data("YX")
     return data.astype("int32")
 
@@ -139,7 +133,7 @@ def read_zarr(path):
     accepted_cells = zarr_file["accepted_cells"][:]
     rejected_cells = zarr_file["rejected_cells"][:]
     flattened_data = zarr_file["data"][:]
-    data = [(id_, amount, (y, x)) for id_, amount, y, x in flattened_data]
+    data = [(int(id_), int(amount), (int(y), int(x))) for id_, amount, y, x in flattened_data]
     metrics = zarr_file["metrics"][:]
     undo_stack = zarr_file["undo_stack"][:]
     selfdrawn_lower_bound = zarr_file.attrs["selfdrawn_lower_bound"]

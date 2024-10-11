@@ -103,7 +103,7 @@ class CellAnalyzer(QWidget):
         ]
         for custom_bind in custom_binds:
             napari_ver = napari.__version__.split(".")
-            if napari_ver[0] == 0 and napari_ver[1] < "5":
+            if int(napari_ver[0]) == 0 and int(napari_ver[1]) < 5:
                 condition = custom_bind[0] in hotkeys
             else:
                 custom_bind_keys = [bind.to_text() for bind in self.viewer.keymap]
@@ -142,6 +142,7 @@ class CellAnalyzer(QWidget):
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Hide:
+            self.logger.debug("Disconnecting slots...")
             self.viewer.layers.events.inserted.disconnect(self.get_label_layer)
             self.viewer.layers.events.removed.disconnect(
                 self.slot_layer_deleted
@@ -928,7 +929,7 @@ class CellAnalyzer(QWidget):
             msg = QMessageBox()
             msg.setWindowTitle("napari")
             msg.setText(
-                "Please enter a comma separated list of integers, for example '1, 5, 2, 8, 199, 5000'."
+                "Please enter a comma separated list of integers, for example: 1, 5, 2, 8, 199, 5000."
             )
             msg.exec_()
             return None
@@ -1018,7 +1019,10 @@ class CellAnalyzer(QWidget):
             msg.exec_()
             return
 
-        given_id = int(self.lineedit_next_id.text())
+        try:
+            given_id = int(self.lineedit_next_id.text())
+        except ValueError:
+            given_id = None
         self.logger.debug(f"Id given by textfield: {given_id}")
         last_evaluated_id = (
             self.undo_stack[-1] if len(self.undo_stack) > 0 else 0
@@ -1035,7 +1039,10 @@ class CellAnalyzer(QWidget):
         computed_id = self.next_id
         self.logger.debug(f"Computed next id: {computed_id}")
 
-        if given_id == computed_id:
+        if given_id is None:
+            # no valid id given
+            next_id = computed_id
+        elif given_id == computed_id:
             # id was not changed
             if computed_id < last_evaluated_id and not ignore_jump_back:
                 # jump back to lowest unprocessed id
