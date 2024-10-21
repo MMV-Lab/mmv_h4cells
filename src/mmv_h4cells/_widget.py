@@ -12,13 +12,16 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QMessageBox,
     QGroupBox,
+    QDialog,
 )
+from qtpy.QtCore import QEvent
 
 import napari
 import numpy as np
 import pandas as pd
 from typing import List, Tuple, Set
 from pathlib import Path
+from mmv_h4cells import __version__ as version
 from mmv_h4cells._reader import open_dialog, read
 from mmv_h4cells._roi import analyse_roi
 from mmv_h4cells._writer import save_dialog, write
@@ -33,7 +36,9 @@ class CellAnalyzer(QWidget):
         super().__init__()
         self.viewer = viewer
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(
+            logging.DEBUG
+        )  # TODO: change to ERROR for release
         self.logger.propagate = False
         for handler in self.logger.handlers[:]:
             self.logger.removeHandler(handler)
@@ -48,10 +53,15 @@ class CellAnalyzer(QWidget):
         self.logger.addHandler(handler)
         self.logger.debug("Initializing CellAnalyzer...")
 
-        self.layer_to_evaluate: Labels = None  # label layer to evaluate
+        self.layer_to_evaluate: Labels = (
+            None  # label layer with remaining and included cells
+        )
         self.accepted_cells: (
             np.ndarray
         )  # label layer esque for all accepted cells
+        self.rejected_cells: np.ndarray = (
+            None  # label layer esque for all rejected cells
+        )
         self.current_cell_layer: Labels = (
             None  # label layer consisting of the current cell to evaluate
         )
@@ -73,19 +83,32 @@ class CellAnalyzer(QWidget):
         self.excluded: Set[int] = set()  # set of all excluded cell ids
         self.undo_stack: List[int] = []  # stack of cell ids to undo
 
+        self.next_id: int = None  # computed id of the next cell to evaluate
+
+        self.selfdrawn_lower_bound: int = (
+            None  # lower bound of self drawn cell id
+        )
+
         self.initialize_ui()
 
         # Hotkeys
 
         hotkeys = self.viewer.keymap.keys()
+        self.logger.debug(f"Current hotkeys: {hotkeys}")
         custom_binds = [
-            ("J", self.on_hotkey_include),
-            ("F", self.on_hotkey_exclude),
-            ("B", self.on_hotkey_undo),
-            ("V", self.toggle_visibility_label_layers_hotkey),
+            ("K", self.on_hotkey_include),
+            ("G", self.on_hotkey_exclude),
+            ("H", self.on_hotkey_undo),
+            ("J", self.toggle_visibility_label_layers_hotkey),
         ]
         for custom_bind in custom_binds:
-            if not custom_bind[0] in hotkeys:
+            napari_ver = napari.__version__.split(".")
+            if int(napari_ver[0]) == 0 and int(napari_ver[1]) < 5:
+                condition = custom_bind[0] in hotkeys
+            else:
+                custom_bind_keys = [bind.to_text() for bind in self.viewer.keymap]
+                condition = custom_bind[0] in custom_bind_keys
+            if not condition:
                 viewer.bind_key(*custom_bind)
 
         self.viewer.layers.events.inserted.connect(self.get_label_layer)
@@ -94,8 +117,37 @@ class CellAnalyzer(QWidget):
                 self.set_label_layer(layer)
                 break
 
-        self.logger.debug("CellAnalyzer initialized")
+        self.viewer.layers.events.removed.connect(self.slot_layer_deleted)
+        self.installEventFilter(self)
+
+        self.logger.debug(f"CellAnalyzer v{version} initialized")
         self.logger.info("Ready to use")
+
+    def slot_layer_deleted(self, event):
+        def readd_layer(data, name):
+            self.logger.debug("Important layer removed")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("Please don't remove this layer, we need it.")
+            msg.exec_()
+            return self.viewer.add_labels(data, name=name)
+
+        self.logger.debug("Layer deleted")
+        if event.value in [self.current_cell_layer, self.layer_to_evaluate]:
+            layer = readd_layer(event.value.data, event.value.name)
+            if event.value.name == self.layer_to_evaluate.name:
+                self.layer_to_evaluate = layer
+            else:
+                self.current_cell_layer = layer
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Hide:
+            self.logger.debug("Disconnecting slots...")
+            self.viewer.layers.events.inserted.disconnect(self.get_label_layer)
+            self.viewer.layers.events.removed.disconnect(
+                self.slot_layer_deleted
+            )
+        return super().eventFilter(source, event)
 
     def on_hotkey_include(self, _):
         if self.btn_include.isEnabled():
@@ -114,13 +166,14 @@ class CellAnalyzer(QWidget):
 
     def initialize_ui(self):
         self.logger.debug("Initializing UI...")
+        starttime = time.time()
 
         ### QObjects
         # objects that can be updated are attributes of the class
         # for ease of access
 
         # Labels
-        title = QLabel("<h1>MMV-Cell_Analyzer</h1>")
+        title = QLabel("<h1>MMV_H4Cells</h1>")
         self.label_next_id = QLabel("Start analysis at:")
         label_include = QLabel("Include:")
         label_included = QLabel("Included:")
@@ -164,6 +217,7 @@ class CellAnalyzer(QWidget):
         self.btn_include = QPushButton("Include")
         self.btn_exclude = QPushButton("Exclude")
         self.btn_undo = QPushButton("Undo")
+        self.btn_cancel = QPushButton("Cancel")
         self.btn_show_included = QPushButton("Show Included")
         self.btn_show_excluded = QPushButton("Show Excluded")
         self.btn_show_remaining = QPushButton("Show Remaining")
@@ -177,6 +231,7 @@ class CellAnalyzer(QWidget):
         self.btn_include.clicked.connect(self.include_on_click)
         self.btn_exclude.clicked.connect(self.exclude_on_click)
         self.btn_undo.clicked.connect(self.undo_on_click)
+        self.btn_cancel.clicked.connect(self.cancel_on_click)
         self.btn_show_included.clicked.connect(self.show_included_on_click)
         self.btn_show_excluded.clicked.connect(self.show_excluded_on_click)
         self.btn_show_remaining.clicked.connect(self.show_remaining_on_click)
@@ -193,13 +248,13 @@ class CellAnalyzer(QWidget):
             "Import previously exported mask and analysis csv to continue analysis"
         )
         self.btn_include.setToolTip(
-            'Include checked cell. Instead of clicking this button, you can also press the "J" key.'
+            'Include checked cell. Instead of clicking this button, you can also press the "K" key.'
         )
         self.btn_exclude.setToolTip(
-            'Undo last selection. Instead of clicking this button, you can also press the "F" key.'
+            'Exclude checked cell. Instead of clicking this button, you can also press the "G" key.'
         )
         self.btn_undo.setToolTip(
-            'Exclude checked cell. Instead of clicking this button, you can also press the "B" key.'
+            'Undo last selection. Instead of clicking this button, you can also press the "H" key.'
         )
 
         self.btn_start_analysis.setEnabled(False)
@@ -207,6 +262,7 @@ class CellAnalyzer(QWidget):
         self.btn_include.setEnabled(False)
         self.btn_exclude.setEnabled(False)
         self.btn_undo.setEnabled(False)
+        self.btn_cancel.setVisible(False)
         self.btn_show_included.setEnabled(False)
         self.btn_show_excluded.setEnabled(False)
         self.btn_show_remaining.setEnabled(False)
@@ -259,7 +315,8 @@ class CellAnalyzer(QWidget):
 
         # QGroupBoxes
         groupbox_roi = QGroupBox("ROI Analysis")
-        groupbox_roi.setStyleSheet("""
+        groupbox_roi.setStyleSheet(
+            """
             QGroupBox {
                 border: 1px solid silver;
                 margin-top: 2ex; /* leave space at the top for the title */
@@ -269,7 +326,8 @@ class CellAnalyzer(QWidget):
                 subcontrol-position: top center; /* position at the top center */
                 padding: 0 3px;
             }
-            """)
+            """
+        )
         groupbox_roi.setLayout(QGridLayout())
         groupbox_roi.layout().addWidget(label_range_y, 0, 0, 1, 1)
         groupbox_roi.layout().addWidget(self.lineedit_y_low, 0, 1, 1, 1)
@@ -307,6 +365,7 @@ class CellAnalyzer(QWidget):
 
         content.layout().addWidget(self.btn_exclude, 5, 0, 1, 1)
         content.layout().addWidget(self.btn_undo, 5, 1, 1, 1)
+        content.layout().addWidget(self.btn_cancel, 5, 1, 1, 1)
         content.layout().addWidget(self.btn_include, 5, 2, 1, 1)
 
         content.layout().addWidget(label_included, 6, 0, 1, 1)
@@ -352,61 +411,68 @@ class CellAnalyzer(QWidget):
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
 
+        endtime = time.time()
+        self.logger.debug(f"Runtime UI initialization: {endtime - starttime}")
+
     def get_label_layer(self, event):
         self.logger.debug("New potential label layer detected...")
-        if not (
-            self.layer_to_evaluate is None and isinstance(event.value, Labels)
-        ):
-            self.logger.debug("New layer invalid or already set")
+        if not self.layer_to_evaluate is None:
+            self.logger.debug("Label layer already set")
+            return
+        if not isinstance(event.value, Labels):
+            self.logger.debug("New layer invalid")
             return
         self.logger.debug("Label layer is valid")
         self.set_label_layer(event.value)
 
     def set_label_layer(self, layer):
         self.logger.debug("Setting label layer...")
+        starttime = time.time()
         self.layer_to_evaluate = layer
         self.btn_start_analysis.setEnabled(True)
         unique_ids = np.unique(self.layer_to_evaluate.data)
         self.logger.debug(f"{len(unique_ids)} unique ids found")
-        if len(self.metric_data) > 0:
-            max_id = np.max(self.accepted_cells)
-            self.logger.debug(f"Highest evaluated id: {max_id}")
-            self.remaining = set(unique_ids) - (self.included | self.excluded | {0})
-        else:
-            max_id = 0
+        if self.selfdrawn_lower_bound is None:
+            self.selfdrawn_lower_bound = max(unique_ids) + 1
+
+        if len(self.metric_data) == 0:
             self.accepted_cells = np.zeros_like(self.layer_to_evaluate.data)
+            self.rejected_cells = np.zeros_like(self.layer_to_evaluate.data)
             self.remaining = set(unique_ids) - {0}
         next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
         self.lineedit_next_id.setText(next_id)
+        self.next_id = next_id if next_id != "" else None
+        self.logger.debug(
+            f"Selfdrawn lower bound: {self.selfdrawn_lower_bound}"
+        )
         self.logger.debug("Sets updated")
         self.update_labels()
+        endtime = time.time()
+        self.logger.debug(f"Runtime set label layer: {endtime - starttime}")
 
     def update_labels(self):
         self.logger.debug("Updating labels...")
         self.label_amount_excluded.setText(str(len(self.excluded)))
         self.label_amount_included.setText(str(len(self.included)))
         self.label_amount_remaining.setText(str(len(self.remaining)))
-        # if self.lineedit_conversion_rate.text().strip() == "":
-        #     unit = "pixel"
-        #     factor = 1
-        # else:
-        #     unit = self.combobox_conversion_unit.currentText() + "²"
-        #     factor = float(self.lineedit_conversion_rate.text())
-        # self.logger.debug(f"Conversion rate: {factor} {unit}")
         self.label_mean_included.setText(str(self.mean_size))
         self.label_std_included.setText(str(self.std_size))
-        # self.label_mean_included.setText(
-        #     f"{str(self.mean_size*factor)} {unit}"
-        # )
-        # self.label_std_included.setText(f"{str(self.std_size*factor)} {unit}")
-        # self.label_metric.included.setText(new value)
 
     def start_analysis_on_click(self):
         self.logger.debug("Analysis started...")
+        label_layers = [
+            layer.name for layer in self.viewer.layers if isinstance(layer, Labels)
+        ]
+        if len(label_layers) > 1:
+            dialog = ChoiceDialog(label_layers, self.layer_to_evaluate.name)
+            choice = dialog.exec_()
+            if choice >= 0:
+                layer = self.viewer.layers[label_layers[choice]]
+                self.set_label_layer(layer)
+        self.logger.debug(f"Using label layer: {self.layer_to_evaluate.name}")
+        starttime = time.time()
         try:
-            start_id = int(
-                self.lineedit_next_id.text()
-            )  
+            start_id = int(self.lineedit_next_id.text())
         except ValueError:
             self.logger.warning("Invalid start id")
             msg = QMessageBox()
@@ -434,6 +500,7 @@ class CellAnalyzer(QWidget):
         self.btn_include_multiple.setEnabled(True)
         self.label_next_id.setText("Next cell:")
         self.layer_to_evaluate.opacity = 0.3
+
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.layer_to_evaluate.data), name="Current Cell"
         )
@@ -446,11 +513,14 @@ class CellAnalyzer(QWidget):
             else:
                 self.logger.info("Using lowest remaining id")
                 start_id = min(self.remaining)
+        self.next_id = min(x for x in self.remaining if x > start_id)
         self.lineedit_next_id.setText(
-            str(min(x for x in self.remaining if x > start_id))
+            str(self.next_id) if self.next_id is not None else ""
         )
         # start iterating through ids to create label layer for and zoom into centroid of label
         self.display_cell(start_id)
+        endtime = time.time()
+        self.logger.debug(f"Runtime start analysis: {endtime - starttime}")
 
     def display_cell(self, cell_id: int):
         self.logger.debug(f"Displaying cell {cell_id}")
@@ -465,6 +535,7 @@ class CellAnalyzer(QWidget):
             index=cell_id,
         )
         self.viewer.camera.center = centroid
+        self.logger.debug(f"Centroid: {centroid}")
         self.viewer.camera.zoom = 7.5  # !!
         self.current_cell_layer.selected_label = cell_id
 
@@ -474,48 +545,42 @@ class CellAnalyzer(QWidget):
         if str(csv_filepath) == ".":
             self.logger.debug("No csv file selected. Aborting.")
             return
-        tiff_filepath = csv_filepath.with_suffix(".tiff")
+        zarr_filepath = csv_filepath.with_suffix(".zarr")
         try:
-            accepted_cells = read(tiff_filepath)
-        except FileNotFoundError:
-            tiff_filepath = tiff_filepath.with_suffix(".tif")
-            try:
-                accepted_cells = read(tiff_filepath)
-            except FileNotFoundError:
-                tiff_filepath = Path(
-                    open_dialog(self, filetype="*.tiff *.tif")
-                )
-                if str(tiff_filepath) == ".":
-                    self.logger.debug("No tiff file selected. Aborting.")
-                    return
-                accepted_cells = read(tiff_filepath)
-        self.accepted_cells = accepted_cells
-        (
-            self.metric_data,
-            metrics,
-            # pixelsize,
-            self.excluded,
-            self.undo_stack,
-        ) = read(csv_filepath)
-        self.mean_size, self.std_size = metrics  # , self.metric_value = ...
-        # (
-        #     self.lineedit_conversion_rate.setText(str(pixelsize[0]))
-        #     if pixelsize[1] != "pixel"
-        #     else self.lineedit_conversion_rate.setText("")
-        # )
-        # self.combobox_conversion_unit.setCurrentText(pixelsize[1])
-        self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
-        self.btn_export.setEnabled(True)
-
-        if not self.layer_to_evaluate is None:
-            self.logger.debug("Filling in values for existing label layer")
-            unique_ids = pd.unique(self.layer_to_evaluate.data.flatten())
-            self.remaining = set(unique_ids) - (
-                self.included | self.excluded | {0}
+            data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, self.selfdrawn_lower_bound = read(
+                zarr_filepath
             )
-            next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
-            self.lineedit_next_id.setText(next_id)
-            self.btn_start_analysis.setEnabled(True)
+        except FileNotFoundError:
+            zarr_filepath = Path(open_dialog(self), dir=True)
+            if str(zarr_filepath) == ".":
+                self.logger.debug("No zarr file selected. Aborting.")
+                return
+            data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, self.selfdrawn_lower_bound = read(
+                zarr_filepath
+            )
+        self.logger.debug(f"Minimum id: {min(pd.unique(data_to_evaluate.flatten()))}, Maximum id: {max(pd.unique(data_to_evaluate.flatten()))}")
+        self.accepted_cells = accepted_cells
+        self.rejected_cells = rejected_cells
+        self.mean_size, self.std_size = metrics  # , self.metric_value = ...
+        self.undo_stack = undo_stack.tolist()
+        self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
+        self.excluded = set(pd.unique(self.rejected_cells.flatten())) - {0}
+        self.btn_export.setEnabled(True)
+        self.metric_data = data
+
+        layer = self.viewer.add_labels(data_to_evaluate, name="Imported Data")
+        self.set_label_layer(layer)
+
+        self.logger.debug("Filling in values for imported data")
+        unique_ids = pd.unique(self.layer_to_evaluate.data.flatten())
+        self.remaining = set(unique_ids) - (
+            self.included | self.excluded | {0}
+        )
+        next_id = (
+            str(min(self.remaining)) if len(self.remaining) > 0 else ""
+        )
+        self.lineedit_next_id.setText(next_id)
+        self.btn_start_analysis.setEnabled(True)
 
         self.update_labels()
 
@@ -525,33 +590,42 @@ class CellAnalyzer(QWidget):
         if csv_filepath.name == ".csv":
             self.logger.debug("No file selected. Aborting.")
             return
+        zarr_filepath = csv_filepath.with_suffix(".zarr")
         tiff_filepath = csv_filepath.with_suffix(".tiff")
-        # if self.lineedit_conversion_rate.text() == "":
-        #     factor = 1
-        #     unit = "pixel"
-        # else:
-        #     factor = float(
-        #         self.lineedit_conversion_rate.text()
-        #     )  # TODO: catch ValueError if not float
-        #     unit = self.combobox_conversion_unit.currentText()
         self.metric_data = sorted(self.metric_data, key=lambda x: x[0])
         write(
             csv_filepath,
             self.metric_data,
             (self.mean_size, self.std_size, 0),
-            # (
-            #     factor,
-            #     unit,
-            #     # self.combobox_conversion_unit.currentText(),
-            # ),
-            self.excluded,
-            self.undo_stack,
         )
         self.logger.debug("Metrics written to csv")
         write(tiff_filepath, self.accepted_cells)
         self.logger.debug("Accepted cells written to tiff")
+        write(
+            zarr_filepath,
+            self.layer_to_evaluate.data,
+            self.accepted_cells,
+            self.rejected_cells,
+            self.metric_data,
+            (self.mean_size, self.std_size),
+            self.undo_stack,
+            self.selfdrawn_lower_bound,
+        )
+        self.logger.debug("Data written to zarr")
 
     def include_on_click(self, self_drawn=False):
+        """
+        Includes the current cell in the analysis.
+
+        Parameters
+        ----------
+        self_drawn : bool, optional
+            Whether the cell was drawn by the user, by default False
+
+        Returns
+        -------
+        bool
+            Whether the cell was included successfully"""
         self.logger.debug("Including cell...")
         starttime_abs = time.time()
         if len(self.remaining) < 1:
@@ -560,16 +634,30 @@ class CellAnalyzer(QWidget):
             msg.setWindowTitle("napari")
             msg.setText("No remaining cells")
             msg.exec_()
-            return
+            return False
 
         if self.check_for_overlap():
-            return
+            return False
 
         endtime = time.time()
         self.logger.debug(f"Runtime overlap check: {endtime - starttime_abs}")
         starttime = time.time()
+        if len(pd.unique(self.current_cell_layer.data.flatten())) > 2:
+            self.logger.debug("Multiple ids in current cell layer")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText(
+                "More than one label detected in current cell layer. Please remove the added label."
+            )
+            msg.exec_()
+            return False
+        endtime = time.time()
+        self.logger.debug(f"Runtime multiple ids check: {endtime - starttime}")
+        starttime = time.time()
         id_ = int(np.max(self.current_cell_layer.data))
         self.include(id_, self.current_cell_layer.data, not self_drawn)
+        if self_drawn:
+            self.layer_to_evaluate.data += self.current_cell_layer.data
         endtime = time.time()
         self.logger.debug(f"Runtime include: {endtime - starttime}")
 
@@ -584,6 +672,7 @@ class CellAnalyzer(QWidget):
             )
         endtime_abs = time.time()
         self.logger.debug(f"Runtime complete: {endtime_abs - starttime_abs}")
+        return True
 
     def exclude_on_click(self):
         self.logger.debug("Excluding cell...")
@@ -594,12 +683,27 @@ class CellAnalyzer(QWidget):
             msg.setText("No remaining cells")
             msg.exec_()
             return
-        current_id = int(
-            max(pd.unique(self.current_cell_layer.data.flatten()))
-        )
+
+        unique_ids = pd.unique(self.current_cell_layer.data.flatten())
+        if len(unique_ids) > 2:
+            self.logger.debug("Multiple ids in current cell layer")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText(
+                "More than one label detected in current cell layer. Please remove the added label."
+            )
+            msg.exec_()
+            return
+
+        current_id = int(max(unique_ids))
         self.excluded.add(current_id)
         self.remaining.remove(current_id)
         self.undo_stack.append(current_id)
+
+        mask = np.where(self.current_cell_layer.data == current_id)
+        self.rejected_cells[mask] = current_id
+        self.layer_to_evaluate.data[mask] = 0
+        self.layer_to_evaluate.refresh()
 
         self.update_labels()
 
@@ -614,7 +718,7 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Before undo:")
         self.logger.debug(f"Last evaluated: {self.undo_stack[-1]}")
         last_evaluated = self.undo_stack.pop(-1)
-        if last_evaluated in self.layer_to_evaluate.data:
+        if last_evaluated < self.selfdrawn_lower_bound:
             self.logger.debug("Adding cell back to remaining")
             self.remaining.add(last_evaluated)
         if last_evaluated in self.accepted_cells:
@@ -623,19 +727,50 @@ class CellAnalyzer(QWidget):
             indices = np.where(self.accepted_cells == last_evaluated)
             self.accepted_cells[indices] = 0
             self.included.remove(last_evaluated)
+            if last_evaluated >= self.selfdrawn_lower_bound:
+                mask = np.where(self.layer_to_evaluate.data == last_evaluated)
+                self.layer_to_evaluate.data[mask] = 0
+                self.layer_to_evaluate.refresh()
         else:
             self.excluded.remove(last_evaluated)
+            mask = np.where(self.rejected_cells == last_evaluated)
+            self.layer_to_evaluate.data[mask] = last_evaluated
+            self.rejected_cells[mask] = 0
         self.lineedit_next_id.setText(str(last_evaluated))
 
         self.calculate_metrics()
         self.update_labels()
+        if last_evaluated < self.selfdrawn_lower_bound:
+            self.display_next_cell(True)
+        else:
+            self.redisplay_current_cell()
+
+    def cancel_on_click(self):
+        self.logger.debug("Cancelling draw own cell...")
+        self.btn_include.setEnabled(True)
+        self.btn_exclude.setEnabled(True)
+        self.btn_undo.setVisible(True)
+        self.btn_cancel.setVisible(False)
+        self.current_cell_layer.mode = "pan_zoom"
+        self.btn_segment.setText("Draw own cell")
         self.display_next_cell()
 
     def show_included_on_click(self):
         if self.btn_show_included.text() == "Show Included":
             self.logger.debug("Showing included cells...")
+            self.btn_include.setEnabled(False)
+            self.btn_exclude.setEnabled(False)
+            self.btn_undo.setEnabled(False)
             self.btn_show_included.setText("Back")
-            self.toggle_visibility_label_layers()
+            self.set_visitibility_label_layers(False)
+            if self.excluded_layer is not None:
+                self.viewer.layers.remove(self.excluded_layer)
+                self.excluded_layer = None
+                self.btn_show_excluded.setText("Show Excluded")
+            if self.remaining_layer is not None:
+                self.viewer.layers.remove(self.remaining_layer)
+                self.remaining_layer = None
+                self.btn_show_remaining.setText("Show Remaining")
             self.included_layer = self.viewer.add_labels(
                 self.accepted_cells, name="Included Cells"
             )
@@ -644,7 +779,7 @@ class CellAnalyzer(QWidget):
             self.logger.debug("Hiding included cells...")
             self.viewer.layers.remove(self.included_layer)
             self.included_layer = None
-            self.toggle_visibility_label_layers()
+            self.set_visitibility_label_layers(True)
             self.btn_show_included.setText("Show Included")
             self.viewer.layers.selection.active = self.current_cell_layer
             centroid = ndimage.center_of_mass(
@@ -654,24 +789,35 @@ class CellAnalyzer(QWidget):
             )
             self.viewer.camera.center = centroid
             self.viewer.camera.zoom = 7.5
+            self.btn_include.setEnabled(True)
+            self.btn_exclude.setEnabled(True)
+            self.btn_undo.setEnabled(True)
 
     def show_excluded_on_click(self):
         if self.btn_show_excluded.text() == "Show Excluded":
             self.logger.debug("Showing excluded cells...")
+            self.btn_include.setEnabled(False)
+            self.btn_exclude.setEnabled(False)
+            self.btn_undo.setEnabled(False)
             self.btn_show_excluded.setText("Back")
-            self.toggle_visibility_label_layers()
-            data = copy.deepcopy(self.layer_to_evaluate.data)
-            mask = np.isin(data, list(self.excluded | {0}), invert=True)
-            data[mask] = 0
+            self.set_visitibility_label_layers(False)
+            if self.included_layer is not None:
+                self.viewer.layers.remove(self.included_layer)
+                self.included_layer = None
+                self.btn_show_included.setText("Show Included")
+            if self.remaining_layer is not None:
+                self.viewer.layers.remove(self.remaining_layer)
+                self.remaining_layer = None
+                self.btn_show_remaining.setText("Show Remaining")
             self.excluded_layer = self.viewer.add_labels(
-                data, name="Excluded Cells"
+                self.rejected_cells, name="Excluded Cells"
             )
             self.viewer.camera.zoom = 1
         else:
             self.logger.debug("Hiding excluded cells...")
             self.viewer.layers.remove(self.excluded_layer)
             self.excluded_layer = None
-            self.toggle_visibility_label_layers()
+            self.set_visitibility_label_layers(True)
             self.btn_show_excluded.setText("Show Excluded")
             self.viewer.layers.selection.active = self.current_cell_layer
             centroid = ndimage.center_of_mass(
@@ -681,12 +827,26 @@ class CellAnalyzer(QWidget):
             )
             self.viewer.camera.center = centroid
             self.viewer.camera.zoom = 7.5
+            self.btn_include.setEnabled(True)
+            self.btn_exclude.setEnabled(True)
+            self.btn_undo.setEnabled(True)
 
     def show_remaining_on_click(self):
         if self.btn_show_remaining.text() == "Show Remaining":
             self.logger.debug("Showing remaining cells...")
+            self.btn_include.setEnabled(False)
+            self.btn_exclude.setEnabled(False)
+            self.btn_undo.setEnabled(False)
             self.btn_show_remaining.setText("Back")
-            self.toggle_visibility_label_layers()
+            self.set_visitibility_label_layers(False)
+            if self.included_layer is not None:
+                self.viewer.layers.remove(self.included_layer)
+                self.included_layer = None
+                self.btn_show_included.setText("Show Included")
+            if self.excluded_layer is not None:
+                self.viewer.layers.remove(self.excluded_layer)
+                self.excluded_layer = None
+                self.btn_show_excluded.setText("Show Excluded")
             data = copy.deepcopy(self.layer_to_evaluate.data)
             mask = np.isin(data, list(self.remaining | {0}), invert=True)
             data[mask] = 0
@@ -698,7 +858,7 @@ class CellAnalyzer(QWidget):
             self.logger.debug("Hiding remaining cells...")
             self.viewer.layers.remove(self.remaining_layer)
             self.remaining_layer = None
-            self.toggle_visibility_label_layers()
+            self.set_visitibility_label_layers(True)
             self.btn_show_remaining.setText("Show Remaining")
             self.viewer.layers.selection.active = self.current_cell_layer
             centroid = ndimage.center_of_mass(
@@ -708,6 +868,9 @@ class CellAnalyzer(QWidget):
             )
             self.viewer.camera.center = centroid
             self.viewer.camera.zoom = 7.5
+            self.btn_include.setEnabled(True)
+            self.btn_exclude.setEnabled(True)
+            self.btn_undo.setEnabled(True)
 
     def include_multiple_on_click(self):
         self.logger.debug(
@@ -718,11 +881,13 @@ class CellAnalyzer(QWidget):
             self.logger.debug("No valid ids in input")
             return
         self.logger.debug(f"Given ids: {given_ids}")
-        included, ignored, overlapped, faulty = self.include_multiple(given_ids)
+        included, ignored, overlapped, faulty = self.include_multiple(
+            given_ids
+        )
         self.lineedit_include.setText("")
         next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
         self.lineedit_next_id.setText(next_id)
-        self.display_next_cell(False)
+        self.display_next_cell(True)
         msg = QMessageBox()
         msg.setWindowTitle("napari")
         msgtext = ""
@@ -763,7 +928,9 @@ class CellAnalyzer(QWidget):
             self.logger.debug("Invalid input")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
-            msg.setText("Please enter a comma separated list of integers.")
+            msg.setText(
+                "Please enter a comma separated list of integers, for example: 1, 5, 2, 8, 199, 5000."
+            )
             msg.exec_()
             return None
         return ids
@@ -801,7 +968,11 @@ class CellAnalyzer(QWidget):
     def draw_own_cell(self):
         if self.btn_segment.text() == "Draw own cell":
             self.logger.debug("Draw own cell initialized")
-            self.btn_segment.setText("Confirm/Back")
+            self.btn_segment.setText("Confirm")
+            self.btn_exclude.setEnabled(False)
+            self.btn_include.setEnabled(False)
+            self.btn_undo.setVisible(False)
+            self.btn_cancel.setVisible(True)
             # Set next id label to current cell layer id
             current_id = str(np.max(self.current_cell_layer.data))
             self.lineedit_next_id.setText(current_id)
@@ -816,16 +987,29 @@ class CellAnalyzer(QWidget):
             self.current_cell_layer.selected_label = (
                 max(
                     np.max(self.accepted_cells),
+                    np.max(self.rejected_cells),
                     np.max(self.layer_to_evaluate.data),
                 )
                 + 1
             )
         else:
             self.logger.debug("Draw own cell confirmed")
-            self.include_on_click(True)
-            self.btn_segment.setText("Draw own cell")
+            self.current_cell_layer.mode = "pan_zoom"
+            if len(pd.unique(self.current_cell_layer.data.flatten())) < 2:
+                self.logger.debug("No label drawn")
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText("No cell annotated.")
+                msg.exec_()
+                return
+            if self.include_on_click(True):
+                self.btn_segment.setText("Draw own cell")
+                self.btn_exclude.setEnabled(True)
+                self.btn_include.setEnabled(True)
+                self.btn_undo.setVisible(True)
+                self.btn_cancel.setVisible(False)
 
-    def display_next_cell(self, check_lowered=True):
+    def display_next_cell(self, ignore_jump_back: bool = False):
         self.logger.debug("Displaying next cell...")
         if len(self.remaining) < 1:
             self.logger.debug("No cells left to evaluate")
@@ -835,67 +1019,88 @@ class CellAnalyzer(QWidget):
             msg.exec_()
             return
 
-        given_id = int(self.lineedit_next_id.text())
+        try:
+            given_id = int(self.lineedit_next_id.text())
+        except ValueError:
+            given_id = None
         self.logger.debug(f"Id given by textfield: {given_id}")
         last_evaluated_id = (
             self.undo_stack[-1] if len(self.undo_stack) > 0 else 0
         )
         self.logger.debug(f"Last evaluated id: {last_evaluated_id}")
-        candidate_ids = sorted(
-            [i for i in self.remaining if i > last_evaluated_id]
+        next_lower = max(
+            [i for i in self.remaining if i < given_id], default=None
         )
-        next_id_computed = (
-            candidate_ids[0] if len(candidate_ids) > 0 else min(self.remaining)
+        self.logger.debug(f"Next lower id: {next_lower}")
+        next_higher = min(
+            [i for i in self.remaining if i > given_id], default=None
         )
-        self.logger.debug(f"Computed next id: {next_id_computed}")
+        self.logger.debug(f"Next higher id: {next_higher}")
+        computed_id = self.next_id
+        self.logger.debug(f"Computed next id: {computed_id}")
 
-        if given_id != next_id_computed:
-            if given_id not in self.remaining:
+        if given_id is None:
+            # no valid id given
+            next_id = computed_id
+        elif given_id == computed_id:
+            # id was not changed
+            if computed_id < last_evaluated_id and not ignore_jump_back:
+                # jump back to lowest unprocessed id
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
-                msg.setText("Given id is not in remaining cells.")
-                msg.exec_()
-                candidate_ids = sorted(
-                    [i for i in self.remaining if i < given_id]
-                )
-                if len(candidate_ids) > 0:
-                    self.logger.debug("Using highest lower id")
-                    next_id = candidate_ids[-1]
-                else:
-                    self.logger.debug("Using lowest remaining id")
-                    next_id = min(self.remaining)
-            else:
-                self.logger.debug("Using given id (not computed)")
-                next_id = given_id
-        else:
-            self.logger.debug("Using given id (computed)")
-            next_id = given_id
-
-        if not check_lowered:
-            self.logger.debug("Skipping check for lowered id")
-
-        if check_lowered and next_id < last_evaluated_id:
-            self.logger.debug("Next id lower than last evaluated id")
-            msg = QMessageBox()
-            msg.setWindowTitle("napari")
-            if next_id_computed < last_evaluated_id:
                 self.logger.debug("No higher id remaining")
                 msg.setText("Dataset is finished. Jumping to earlier cells.")
+            next_id = computed_id
+        elif given_id != computed_id and given_id in self.remaining:
+            # id was changed and is in remaining
+            next_id = given_id
+        elif given_id > computed_id:
+            # id was increased and is not in remaining
+            next_id = next_lower
+        else:
+            # given_id < computed_id -> id was decreased and is not in remaining
+            if given_id > last_evaluated_id:
+                # maybe others < last < given < computed
+                next_id = next_lower if next_lower is not None else computed_id
+            elif computed_id < last_evaluated_id and not ignore_jump_back:
+                # given < computed (smallest existing) < maybe others < last
+                next_id = computed_id
             else:
-                self.logger.debug("Higher id is remaining")
-                msg.setText("Lowering the next cell id is a bad idea.")
+                # others? < given < others? < computed < last (self drawn)
+                # others? < given < others? < last < computed
+                next_id = next_lower if next_lower is not None else next_higher
+
+        if "msg" in locals():
             msg.exec_()
         self.display_cell(next_id)
 
         if len(self.remaining) > 1:
             candidate_ids = sorted([i for i in self.remaining if i > next_id])
             if len(candidate_ids) > 0:
-                next_label = candidate_ids[0]
+                self.next_id = candidate_ids[0]
             else:
-                next_label = min(self.remaining)
-            self.lineedit_next_id.setText(str(next_label))
+                self.next_id = min(self.remaining)
+            self.lineedit_next_id.setText(str(self.next_id))
         else:
             self.lineedit_next_id.setText("")
+            self.next_id = None
+        self.logger.debug("Value for next cell set")
+
+    def redisplay_current_cell(self):
+        self.logger.debug("Redisplaying current cell...")
+        id_ = self.current_cell_layer.selected_label
+        self.display_cell(id_)
+
+        if len(self.remaining) > 1:
+            candidate_ids = sorted([i for i in self.remaining if i > id_])
+            if len(candidate_ids) > 0:
+                self.next_id = candidate_ids[0]
+            else:
+                self.next_id = min(self.remaining)
+            self.lineedit_next_id.setText(str(self.next_id))
+        else:
+            self.lineedit_next_id.setText("")
+            self.next_id = None
         self.logger.debug("Value for next cell set")
 
     def include(
@@ -933,11 +1138,13 @@ class CellAnalyzer(QWidget):
         """
         self.logger.debug("Calculating overlap...")
         nonzero_current = np.nonzero(self.current_cell_layer.data)
-        accepted_cells = np.copy(self.accepted_cells)
-        nonzero_accepted = np.nonzero(accepted_cells)
+        eval_cells = np.copy(self.layer_to_evaluate.data)
+        id_ = self.current_cell_layer.selected_label
+        eval_cells[eval_cells == id_] = 0
+        nonzero_eval = np.nonzero(eval_cells)
         combined_layer = np.zeros_like(self.layer_to_evaluate.data)
         combined_layer[nonzero_current] += 1
-        combined_layer[nonzero_accepted] += 1
+        combined_layer[nonzero_eval] += 1
         overlap = set(map(tuple, np.transpose(np.where(combined_layer == 2))))
         return overlap
 
@@ -1011,6 +1218,14 @@ class CellAnalyzer(QWidget):
             self.mean_size = 0
             self.std_size = 0
 
+    def set_visitibility_label_layers(self, visible: bool):
+        self.logger.debug(
+            f"Setting visibility of label layers to {visible}..."
+        )
+        for layer in self.viewer.layers:
+            if isinstance(layer, Labels):
+                layer.visible = visible
+
     def toggle_visibility_label_layers(self):
         self.logger.debug("Toggling visibility of label layers...")
         for layer in self.viewer.layers:
@@ -1033,7 +1248,9 @@ class CellAnalyzer(QWidget):
         if csv_filepath.name == ".csv":
             self.logger.debug("No file selected. Aborting.")
             return
-        csv_filepath = csv_filepath.with_name(csv_filepath.stem + "_roi" + csv_filepath.suffix)
+        csv_filepath = csv_filepath.with_name(
+            csv_filepath.stem + "_roi" + csv_filepath.suffix
+        )
         tiff_filepath = csv_filepath.with_suffix(".tiff")
         worker = analyse_roi(
             self.layer_to_evaluate.data,
@@ -1072,7 +1289,9 @@ class CellAnalyzer(QWidget):
                 else self.layer_to_evaluate.data.shape[1]
             )
             max_ -= 1 if "low" in lineedit.objectName() else 0
-            if (value < min_ or value > max_ and lineedit.objectName() != "") and value != -1:
+            if (
+                value < min_ or value > max_ and lineedit.objectName() != ""
+            ) and value != -1:
                 lineedit.setText("")
                 params.append(None)
                 continue
@@ -1107,7 +1326,11 @@ class CellAnalyzer(QWidget):
         image, df, paths, threshold = params
         csv_filepath, tiff_filepath = paths
         data = df.itertuples(index=False)
-        metrics = (np.round(df["count [px]"].mean(), 3), np.round(df["count [px]"].std(), 3), threshold)
+        metrics = (
+            np.round(df["count [px]"].mean(), 3),
+            np.round(df["count [px]"].std(), 3),
+            threshold,
+        )
         # if self.lineedit_conversion_rate.text() == "":
         #     factor = 1
         #     unit = "pixel"
@@ -1117,8 +1340,8 @@ class CellAnalyzer(QWidget):
         #     )  # TODO: catch ValueError if not float
         #     unit = self.combobox_conversion_unit.currentText()
         # pixelsize = (factor, unit)
-        undo_stack = df["id"].tolist()
-        write(csv_filepath, data, metrics, set(), undo_stack)
+        # undo_stack = df["id"].tolist()
+        write(csv_filepath, data, metrics)
         # write(csv_filepath, data, metrics, pixelsize, set(), undo_stack)
         write(tiff_filepath, image)
         self.logger.debug("ROI data exported.")
@@ -1126,3 +1349,25 @@ class CellAnalyzer(QWidget):
         msg.setWindowTitle("napari")
         msg.setText("ROI data exported.")
         msg.exec_()
+
+
+class ChoiceDialog(QDialog):
+    def __init__(self, layernames: List[str], selected: str):
+        super().__init__()
+        self.setWindowTitle("Choose Label Layer")
+        self.combobox = QComboBox()
+        self.combobox.addItems(layernames)
+        self.combobox.setCurrentText(selected)
+        btn_select = QPushButton("Select")
+        btn_select.clicked.connect(self.accept)
+        layout = QVBoxLayout()
+        layout.addWidget(self.combobox)
+        layout.addWidget(btn_select)
+        self.setLayout(layout)
+        self.setMinimumSize(250, 100)
+
+    def accept(self):
+        self.done(self.combobox.currentIndex())
+
+    def reject(self):
+        self.done(-1)
