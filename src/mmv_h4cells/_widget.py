@@ -1352,7 +1352,7 @@ class CellAnalyzer(QWidget):
 
 
 class ChoiceDialog(QDialog):
-    def __init__(self, layernames: list[str], selected: str):
+    def __init__(self, layernames: List[str], selected: str):
         super().__init__()
         self.setWindowTitle("Choose Label Layer")
         self.combobox = QComboBox()
