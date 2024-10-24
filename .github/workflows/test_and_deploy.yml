@@ -87,7 +87,7 @@ jobs:
         uses: pypa/gh-action-pypi@master
         with:
           user: __token__
-          password: ${{ secrets-PYPI_TOKEN }}
+          password: ${{ secrets.PYPI_TOKEN }}
         # env:
         #   TWINE_USERNAME: __token__
         #   TWINE_PASSWORD: ${{ secrets.TWINE_API_KEY }}
