@@ -6,7 +6,7 @@ from unittest.mock import patch, call
 
 import numpy as np
 from pathlib import Path
-from aicsimageio import AICSImage
+from bioio import BioImage
 from qtpy.QtWidgets import QMessageBox
 
 from mmv_h4cells import CellAnalyzer
@@ -23,7 +23,7 @@ def create_widget(make_napari_viewer):
 def create_started_widget(create_widget):
     widget = create_widget
     file = Path(PATH / "ex-seg.tiff")
-    segmentation = AICSImage(file).get_image_data("YX")
+    segmentation = BioImage(file).get_image_data("YX")
     widget.viewer.add_labels(segmentation, name="segmentation")
     widget.start_analysis_on_click()
     yield widget
@@ -82,7 +82,7 @@ def test_hotkeys(create_widget):
 def test_get_label_layer(mock_set, create_widget):
     widget = create_widget
     file = Path(PATH / "ex-seg.tiff")
-    segmentation = AICSImage(file).get_image_data("ZYX")
+    segmentation = BioImage(file).get_image_data("ZYX")
 
     layer = widget.viewer.add_labels(segmentation, name="segmentation")
     mock_set.assert_called_once_with(layer)
@@ -91,7 +91,7 @@ def test_get_label_layer(mock_set, create_widget):
 def test_set_label_layer(create_widget):
     widget = create_widget
     file = Path(PATH / "ex-seg.tiff")
-    segmentation = AICSImage(file).get_image_data("ZYX")
+    segmentation = BioImage(file).get_image_data("ZYX")
 
     widget.viewer.layers.events.inserted.disconnect(widget.get_label_layer)
     widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
@@ -136,7 +136,7 @@ def test_start_analysis(create_widget):
     widget = create_widget
     widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
     file = Path(PATH / "ex-seg.tiff")
-    segmentation = AICSImage(file).get_image_data("ZYX")
+    segmentation = BioImage(file).get_image_data("ZYX")
 
     layer = widget.viewer.add_labels(segmentation, name="segmentation")
     widget.start_analysis_on_click()
@@ -156,7 +156,7 @@ def test_display_cell(create_widget):
     widget = create_widget
     widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
     file = Path(PATH / "ex-seg.tiff")
-    segmentation = AICSImage(file).get_image_data("ZYX")
+    segmentation = BioImage(file).get_image_data("ZYX")
 
     widget.viewer.add_labels(segmentation, name="segmentation")
     widget.start_analysis_on_click()
@@ -189,7 +189,7 @@ def test_import(
     widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
     if layer_loaded:
         file = Path(PATH / "ex-seg.tiff")
-        segmentation = AICSImage(file).get_image_data("YX")
+        segmentation = BioImage(file).get_image_data("YX")
         widget.viewer.add_labels(segmentation, name="segmentation")
         mock_update.reset_mock()
 

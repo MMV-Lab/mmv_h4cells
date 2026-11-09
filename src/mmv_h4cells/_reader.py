@@ -1,6 +1,6 @@
 from qtpy.QtWidgets import QFileDialog
 import csv
-from aicsimageio import AICSImage
+from bioio import BioImage
 import json
 import zarr
 
@@ -124,7 +124,7 @@ def read_csv(path):  # adjust if needed if metrics are added # unused
 
 
 def read_tiff(path): # unused
-    data = AICSImage(path).get_image_data("YX")
+    data = BioImage(path).get_image_data("YX")
     return data.astype("int32")
 
 def read_zarr(path):

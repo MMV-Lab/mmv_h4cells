@@ -7,6 +7,7 @@ import numpy as np
 from unittest.mock import patch, Mock, call, mock_open
 from pathlib import Path
 
+from bioio import BioImage
 from qtpy.QtWidgets import QFileDialog
 from mmv_h4cells._writer import (
     save_dialog,
@@ -95,21 +96,12 @@ def test_write_csv(mock_csv_writer):
     assert mock_writerow.call_count == 5
 
 
-@patch("aicsimageio.writers.OmeTiffWriter.save")
-def test_write_tiff(mock_save):
-    array = np.zeros((10, 10))
+def test_write_tiff(tmp_path):
+    array = np.arange(100).reshape(10, 10)
+    path = tmp_path / "test.tiff"
 
-    def mock_side_effect(data, _, dim_order_out):
-        assert isinstance(data[0, 0], np.uint16)
-        assert dim_order_out == "YX"
-
-    mock_save.side_effect = mock_side_effect
-    path = Path("test.tiff")
     write_tiff(path, array)
-    mock_save.assert_called_once()
-    args, arg3 = mock_save.call_args
-    dim_order_out = arg3["dim_order_out"]
-    arg1, arg2 = args
-    assert np.array_equal(arg1, array)
-    assert arg2 == path
-    assert dim_order_out == "YX"
+
+    data = BioImage(path).get_image_data("YX")
+    assert data.dtype == np.uint16
+    assert np.array_equal(data, array)

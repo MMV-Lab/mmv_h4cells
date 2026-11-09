@@ -2,7 +2,7 @@ import numpy as np
 import csv
 import locale
 from typing import List, Tuple
-from aicsimageio.writers import OmeTiffWriter
+import tifffile
 from pathlib import Path
 from qtpy.QtWidgets import QFileDialog
 import zarr
@@ -95,7 +95,8 @@ def convert_np64_to_string(sublist):
 
 def write_tiff(path: Path, data: np.ndarray):
     data = data.astype(np.uint16)
-    OmeTiffWriter.save(data, path, dim_order_out="YX")
+    axes = "ZYX" if data.ndim == 3 else "YX"
+    tifffile.imwrite(path, data, ome=True, metadata={"axes": axes})
 
 
 def write_zarr(

@@ -2,7 +2,7 @@ import numpy as np
 
 from pathlib import Path
 import csv
-from aicsimageio.writers import OmeTiffWriter
+import tifffile
 from mmv_h4cells._reader import napari_get_reader
 
 
@@ -24,7 +24,7 @@ def test_reader_csv(tmp_path):
 def test_reader_tiff(tmp_path):
     my_test_file = Path(tmp_path / "myfile.tiff")
     data = np.random.rand(10,10)
-    OmeTiffWriter.save(data, my_test_file, dim_order_out="YX")
+    tifffile.imwrite(my_test_file, data)
     
     reader = napari_get_reader(my_test_file)
     assert callable(reader)
