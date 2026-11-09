@@ -1227,3 +1227,102 @@ def test_import_invalid_folder_shows_message(create_widget, tmp_path):
     mock_box.return_value.setText.assert_called_once()
     assert widget.layer_to_evaluate is None
     assert len(widget.viewer.layers) == 0
+
+# --- start analysis / next cell edge cases --------------------------------
+
+
+def _labels(*ids):
+    """Label image with one 2x2 square per id."""
+    data = np.zeros((20, 20), dtype=np.int32)
+    for n, id_ in enumerate(ids):
+        data[n * 3 : n * 3 + 2, 0:2] = id_
+    return data
+
+
+@pytest.mark.parametrize("text", ["", "abc"])
+def test_display_next_cell_invalid_next_id(create_started_widget, text):
+    widget = create_started_widget
+    widget.lineedit_next_id.setText(text)
+
+    widget.display_next_cell()
+
+    assert widget.current_cell_layer.selected_label in widget.remaining
+
+
+def test_start_analysis_on_highest_remaining_id(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.lineedit_next_id.setText("3")
+
+    widget.start_analysis_on_click()
+
+    assert widget.current_cell_layer.selected_label == 3
+    assert widget.next_id == 1  # wraps around
+    assert widget.lineedit_next_id.text() == "1"
+
+
+def test_start_analysis_with_single_cell(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(5), name="labels")
+
+    widget.start_analysis_on_click()
+
+    assert widget.current_cell_layer.selected_label == 5
+    assert widget.next_id is None
+    assert widget.lineedit_next_id.text() == ""
+
+
+def test_display_next_cell_with_single_cell_left(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(5), name="labels")
+    widget.start_analysis_on_click()
+    widget.lineedit_next_id.setText("3")  # not in remaining, next_id is None
+
+    widget.display_next_cell()
+
+    assert widget.current_cell_layer.selected_label == 5
+
+
+def test_start_analysis_cancelled_layer_choice(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="first")
+    widget.viewer.add_labels(_labels(3, 4), name="second")
+
+    with patch("mmv_h4cells._widget.ChoiceDialog") as mock_dialog:
+        mock_dialog.return_value.exec_.return_value = -1
+        widget.start_analysis_on_click()
+
+    assert widget.current_cell_layer is None
+    assert widget.btn_start_analysis.isEnabled()
+    assert not widget.btn_include.isEnabled()
+
+
+def _jump_back_setup(widget):
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+    widget.undo_stack = [3]  # last evaluated was the highest id
+    widget.next_id = 1
+    widget.lineedit_next_id.setText("1")
+
+
+def test_display_next_cell_jump_back_message(create_widget):
+    widget = create_widget
+    _jump_back_setup(widget)
+
+    with patch("mmv_h4cells._widget.QMessageBox") as mock_box:
+        widget.display_next_cell()
+
+    mock_box.return_value.setText.assert_called_once_with(
+        "Dataset is finished. Jumping to earlier cells."
+    )
+    mock_box.return_value.exec_.assert_called_once()
+
+
+def test_display_next_cell_no_message_when_ignoring_jump_back(create_widget):
+    widget = create_widget
+    _jump_back_setup(widget)
+
+    with patch("mmv_h4cells._widget.QMessageBox") as mock_box:
+        widget.display_next_cell(True)
+
+    mock_box.return_value.exec_.assert_not_called()

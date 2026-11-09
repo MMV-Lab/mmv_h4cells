@@ -466,9 +466,11 @@ class CellAnalyzer(QWidget):
         if len(label_layers) > 1:
             dialog = ChoiceDialog(label_layers, self.layer_to_evaluate.name)
             choice = dialog.exec_()
-            if choice >= 0:
-                layer = self.viewer.layers[label_layers[choice]]
-                self.set_label_layer(layer)
+            if choice < 0:
+                self.logger.debug("Layer selection cancelled")
+                return
+            layer = self.viewer.layers[label_layers[choice]]
+            self.set_label_layer(layer)
         self.logger.debug(f"Using label layer: {self.layer_to_evaluate.name}")
         starttime = time.time()
         try:
@@ -513,7 +515,14 @@ class CellAnalyzer(QWidget):
             else:
                 self.logger.info("Using lowest remaining id")
                 start_id = min(self.remaining)
-        self.next_id = min(x for x in self.remaining if x > start_id)
+        higher_ids = [x for x in self.remaining if x > start_id]
+        if higher_ids:
+            self.next_id = min(higher_ids)
+        elif len(self.remaining) > 1:
+            # start id is the highest remaining one: wrap around
+            self.next_id = min(self.remaining)
+        else:
+            self.next_id = None
         self.lineedit_next_id.setText(
             str(self.next_id) if self.next_id is not None else ""
         )
@@ -1044,16 +1053,22 @@ class CellAnalyzer(QWidget):
             self.undo_stack[-1] if len(self.undo_stack) > 0 else 0
         )
         self.logger.debug(f"Last evaluated id: {last_evaluated_id}")
-        next_lower = max(
-            [i for i in self.remaining if i < given_id], default=None
-        )
+        next_lower = next_higher = None
+        if given_id is not None:
+            next_lower = max(
+                [i for i in self.remaining if i < given_id], default=None
+            )
+            next_higher = min(
+                [i for i in self.remaining if i > given_id], default=None
+            )
         self.logger.debug(f"Next lower id: {next_lower}")
-        next_higher = min(
-            [i for i in self.remaining if i > given_id], default=None
-        )
         self.logger.debug(f"Next higher id: {next_higher}")
-        computed_id = self.next_id
+        # next_id is None when only one cell is left
+        computed_id = (
+            self.next_id if self.next_id is not None else min(self.remaining)
+        )
         self.logger.debug(f"Computed next id: {computed_id}")
+        msg = None
 
         if given_id is None:
             # no valid id given
@@ -1086,7 +1101,9 @@ class CellAnalyzer(QWidget):
                 # others? < given < others? < last < computed
                 next_id = next_lower if next_lower is not None else next_higher
 
-        if "msg" in locals():
+        if next_id is None:
+            next_id = computed_id
+        if msg is not None:
             msg.exec_()
         self.display_cell(next_id)
 
