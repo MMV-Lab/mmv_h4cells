@@ -547,17 +547,33 @@ class CellAnalyzer(QWidget):
             return
         zarr_filepath = csv_filepath.with_suffix(".zarr")
         try:
-            data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, self.selfdrawn_lower_bound = read(
-                zarr_filepath
-            )
+            session = read(zarr_filepath)
         except FileNotFoundError:
-            zarr_filepath = Path(open_dialog(self), dir=True)
+            self.logger.debug("No zarr next to the csv. Asking for location.")
+            zarr_filepath = Path(open_dialog(self, dir=True))
             if str(zarr_filepath) == ".":
                 self.logger.debug("No zarr file selected. Aborting.")
                 return
-            data_to_evaluate, accepted_cells, rejected_cells, data, metrics, undo_stack, self.selfdrawn_lower_bound = read(
-                zarr_filepath
-            )
+            try:
+                session = read(zarr_filepath)
+            except (FileNotFoundError, KeyError, ValueError):
+                self.logger.warning("Selected folder is not a valid session")
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText(
+                    "The selected folder is not a valid exported .zarr session."
+                )
+                msg.exec_()
+                return
+        (
+            data_to_evaluate,
+            accepted_cells,
+            rejected_cells,
+            data,
+            metrics,
+            undo_stack,
+            self.selfdrawn_lower_bound,
+        ) = session
         self.logger.debug(f"Minimum id: {min(pd.unique(data_to_evaluate.flatten()))}, Maximum id: {max(pd.unique(data_to_evaluate.flatten()))}")
         self.accepted_cells = accepted_cells
         self.rejected_cells = rejected_cells

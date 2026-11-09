@@ -16,7 +16,16 @@ PATH = Path(__file__).parent / "data"
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
-    yield CellAnalyzer(make_napari_viewer())
+    widget = CellAnalyzer(make_napari_viewer())
+    yield widget
+    # The viewer removes all layers on teardown, which would otherwise make
+    # the widget show its blocking "don't remove this layer" dialog.
+    try:
+        widget.viewer.layers.events.removed.disconnect(
+            widget.slot_layer_deleted
+        )
+    except (TypeError, ValueError, RuntimeError):
+        pass
 
 
 @pytest.fixture
@@ -1127,3 +1136,94 @@ class TestCalculateMetrics:
         widget.calculate_metrics()
         assert widget.mean_size == 150
         assert widget.std_size == 50
+
+# --- import ---------------------------------------------------------------
+
+
+def _write_session(zarr_path):
+    from mmv_h4cells._writer import write_zarr
+
+    data = np.zeros((10, 10), dtype=np.int32)
+    data[0:2, 0:2] = 1
+    data[4:6, 4:6] = 2
+    data[8:10, 8:10] = 3
+    accepted = np.where(data == 1, data, 0)
+    rejected = np.where(data == 2, data, 0)
+    write_zarr(
+        zarr_path,
+        data,
+        accepted,
+        rejected,
+        [(1, 4, (0, 0))],
+        (4.0, 0.0),
+        [1, 2],
+        4,
+    )
+
+
+def _assert_imported(widget):
+    assert widget.layer_to_evaluate is not None
+    assert widget.included == {1}
+    assert widget.excluded == {2}
+    assert widget.remaining == {3}
+    assert widget.btn_start_analysis.isEnabled()
+
+
+def test_import_zarr_next_to_csv(create_widget, tmp_path):
+    widget = create_widget
+    _write_session(tmp_path / "session.zarr")
+    csv_path = str(tmp_path / "session.csv")
+
+    with patch("mmv_h4cells._widget.open_dialog", return_value=csv_path):
+        widget.import_on_click()
+
+    _assert_imported(widget)
+
+
+def test_import_asks_for_zarr_when_missing_next_to_csv(
+    create_widget, tmp_path
+):
+    widget = create_widget
+    zarr_dir = tmp_path / "elsewhere" / "moved.zarr"
+    zarr_dir.parent.mkdir()
+    _write_session(zarr_dir)
+    csv_path = str(tmp_path / "session.csv")  # no session.zarr beside it
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        side_effect=[csv_path, str(zarr_dir)],
+    ) as mock_open:
+        widget.import_on_click()
+
+    assert mock_open.call_args_list[1] == call(widget, dir=True)
+    _assert_imported(widget)
+
+
+def test_import_missing_zarr_and_dialog_cancelled(create_widget, tmp_path):
+    widget = create_widget
+    csv_path = str(tmp_path / "session.csv")
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog", side_effect=[csv_path, ""]
+    ):
+        widget.import_on_click()
+
+    assert widget.layer_to_evaluate is None
+    assert len(widget.viewer.layers) == 0
+
+
+def test_import_invalid_folder_shows_message(create_widget, tmp_path):
+    widget = create_widget
+    csv_path = str(tmp_path / "session.csv")
+    not_a_session = tmp_path / "empty_folder"
+    not_a_session.mkdir()
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        side_effect=[csv_path, str(not_a_session)],
+    ), patch("mmv_h4cells._widget.QMessageBox") as mock_box:
+        widget.import_on_click()
+
+    mock_box.return_value.setText.assert_called_once()
+    assert widget.layer_to_evaluate is None
+    assert len(widget.viewer.layers) == 0

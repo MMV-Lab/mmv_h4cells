@@ -4,6 +4,8 @@ from bioio import BioImage
 import json
 import zarr
 
+_ZARR_NOT_FOUND = getattr(zarr.errors, "PathNotFoundError", FileNotFoundError)
+
 
 def open_dialog(parent, filetype="*.csv", directory="", dir: bool = False):
     """
@@ -38,6 +40,8 @@ def open_dialog(parent, filetype="*.csv", directory="", dir: bool = False):
 
 def read(path):
     reader = napari_get_reader(path)
+    if reader is None:
+        raise ValueError(f"Unsupported file type: {path}")
     return reader(path)
 
 
@@ -128,7 +132,11 @@ def read_tiff(path): # unused
     return data.astype("int32")
 
 def read_zarr(path):
-    zarr_file = zarr.open(path, mode="r")
+    try:
+        zarr_file = zarr.open(path, mode="r")
+    except _ZARR_NOT_FOUND as e:
+        # zarr does not raise FileNotFoundError for a missing store
+        raise FileNotFoundError(f"No zarr store at {path}") from e
     data_to_evaluate = zarr_file["data_to_valuate"][:]
     accepted_cells = zarr_file["accepted_cells"][:]
     rejected_cells = zarr_file["rejected_cells"][:]
