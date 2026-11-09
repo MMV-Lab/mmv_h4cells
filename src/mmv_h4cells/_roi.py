@@ -12,6 +12,9 @@ def analyse_roi(
     size_threshold: int,
     paths: Tuple[str, str],
 ):
+    # Work on a copy: the caller passes the live layer data, which must not
+    # be modified by the export.
+    data = data.copy()
     cropped_mask = data[y[0]:y[1], x[0]:x[1]]
     
     # Get unique ids and counts
