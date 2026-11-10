@@ -164,78 +164,6 @@ def test_display_cell(create_widget):
     assert np.max(widget.current_cell_layer.data) == 4
 
 
-@patch("mmv_h4cells._widget.open_dialog", return_value="test.csv")
-@patch("mmv_h4cells._widget.read")
-@patch.object(CellAnalyzer, "update_labels")
-@pytest.mark.parametrize(
-    "csv_data",
-    [
-        ([], (0, 0)),
-        ([(1, 1, (1, 1))], (1, 1)),
-        (
-            [(1, 1, (1, 1)), (2, 2, (2, 2))],
-            (1.5, 0.5),
-        ),
-        ([], (0, 0)),
-    ],
-)
-@pytest.mark.parametrize("layer_loaded", [True, False])
-@pytest.mark.skip("Old test")
-# TODO: Update test
-def test_import(
-    mock_update, mock_read, mock_open, create_widget, csv_data, layer_loaded
-):
-    widget = create_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    if layer_loaded:
-        file = Path(PATH / "ex-seg.tiff")
-        segmentation = BioImage(file).get_image_data("YX")
-        widget.viewer.add_labels(segmentation, name="segmentation")
-        mock_update.reset_mock()
-
-    def mock_side(path):
-        if path.suffix == ".csv":
-            return csv_data
-        elif path.suffix == ".tiff":
-            img = np.zeros((10, 10), dtype=np.int32)
-            if 1 in csv_data[4] and not 1 in csv_data[3]:
-                img[1, 1] = 1
-            if 2 in csv_data[4] and not 2 in csv_data[3]:
-                img[2, 2] = 2
-            if 3 in csv_data[4] and not 3 in csv_data[3]:
-                img[3, 3] = 3
-            return img
-
-    mock_read.side_effect = mock_side
-    widget.import_on_click()
-    mock_open.assert_called_once()
-    mock_read.assert_has_calls(
-        [call(Path("test.csv")), call(Path("test.tiff"))], any_order=True
-    )
-    assert widget.metric_data == csv_data[0]
-    assert widget.mean_size == csv_data[1][0]
-    assert widget.std_size == csv_data[1][1]
-    assert widget.lineedit_conversion_rate.text() == str(csv_data[2][0])
-    assert (
-        widget.combobox_conversion_unit.currentText() == csv_data[2][1]
-        if csv_data[2][1] != "pixel"
-        else "mm"
-    )
-    assert widget.excluded == csv_data[3]
-    assert widget.undo_stack == csv_data[4]
-    assert widget.accepted_cells.shape == (10, 10)
-    for id_ in csv_data[4]:
-        if id_ not in csv_data[3]:
-            assert id_ in widget.accepted_cells
-    assert widget.included == set(csv_data[4]) - csv_data[3]
-    assert widget.btn_export.isEnabled()
-    if layer_loaded:
-        assert widget.remaining == {1, 2, 3, 4, 5, 6, 7} - set(csv_data[4])
-        assert widget.lineedit_next_id.text() == str(min(widget.remaining))
-        assert widget.btn_start_analysis.isEnabled()
-    mock_update.assert_called_once()
-
-
 @patch("mmv_h4cells._widget.open_dialog", return_value=".")
 @patch("mmv_h4cells._widget.read")
 @patch.object(CellAnalyzer, "update_labels")
@@ -245,98 +173,6 @@ def test_import_no_csv(mock_update, mock_read, mock_open, create_widget):
     mock_open.assert_called_once()
     mock_read.assert_not_called()
     mock_update.assert_not_called()
-
-
-@patch("mmv_h4cells._widget.open_dialog")
-@patch("mmv_h4cells._widget.read")
-@patch.object(CellAnalyzer, "update_labels")
-@pytest.mark.skip("Old test")
-# TODO: Update test
-def test_import_no_tiff(mock_update, mock_read, mock_open, create_widget):
-    widget = create_widget
-
-    def side_effect(_, filetype=None):
-        if filetype is None:
-            return "test.csv"
-        return "."
-
-    mock_open.side_effect = side_effect
-    mock_read.side_effect = FileNotFoundError()
-    widget.import_on_click()
-    assert mock_open.call_count == 2
-    assert mock_read.call_count == 2
-    mock_read.assert_has_calls(
-        [call(Path("test.tiff")), call(Path("test.tif"))]
-    )
-    mock_update.assert_not_called()
-
-
-@patch("mmv_h4cells._widget.open_dialog", return_value="test.csv")
-@patch("mmv_h4cells._widget.read")
-@patch.object(CellAnalyzer, "update_labels")
-@pytest.mark.skip("Old test")
-# TODO Update test
-def test_import_tif(mock_update, mock_read, mock_open, create_widget):
-    def side_effect(path):
-        if path.suffix == ".csv":
-            return [], (0, 0), (1, "pixel"), set(), []
-        elif path.suffix == ".tif":
-            return np.zeros((10, 10), dtype=np.int32)
-        raise FileNotFoundError()
-
-    mock_read.side_effect = side_effect
-    widget = create_widget
-    widget.import_on_click()
-    mock_open.assert_called_once()
-    assert mock_read.call_count == 3
-    mock_read.assert_has_calls(
-        [
-            call(Path("test.tiff")),
-            call(Path("test.tif")),
-            call(Path("test.csv")),
-        ]
-    )
-    mock_update.assert_called_once()
-
-
-@patch("mmv_h4cells._widget.open_dialog")
-@patch("mmv_h4cells._widget.read")
-@patch.object(CellAnalyzer, "update_labels")
-@pytest.mark.parametrize("filename", ["test.tiff", "test.tif"])
-@pytest.mark.skip("Old test")
-# TODO: Update test
-def test_import_tiff_prompt(
-    mock_update, mock_read, mock_open, create_widget, filename
-):
-    widget = create_widget
-
-    def open_side_effect(_, filetype=None):
-        if filetype is None:
-            return "test.csv"
-        return f"subdirectory/{filename}"
-
-    mock_open.side_effect = open_side_effect
-
-    def read_side_effect(path):
-        if path.suffix == ".csv":
-            return [], (0, 0), (1, "pixel"), set(), []
-        elif path.parent == Path("subdirectory"):
-            return np.zeros((10, 10), dtype=np.int32)
-        raise FileNotFoundError()
-
-    mock_read.side_effect = read_side_effect
-    widget.import_on_click()
-    assert mock_open.call_count == 2
-    assert mock_read.call_count == 4
-    mock_read.assert_has_calls(
-        [
-            call(Path("test.tiff")),
-            call(Path("test.tif")),
-            call(Path(f"subdirectory/{filename}")),
-            call(Path("test.csv")),
-        ]
-    )
-    mock_update.called_once()
 
 
 @patch("mmv_h4cells._widget.save_dialog", return_value="test.csv")
@@ -611,108 +447,88 @@ def test_undo_on_click_no_undo_stack(
     mock_display.assert_not_called()
 
 
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@patch.object(CellAnalyzer, "set_visibility_label_layers")
-def test_show_included_on_click(mock_toggle, create_started_widget):
-    widget = create_started_widget
-    # widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
+# --- show / hide included, excluded, remaining ------------------------------
+
+SHOW_KINDS = [
+    pytest.param("included", {1}, id="included"),
+    pytest.param("excluded", {2}, id="excluded"),
+    pytest.param("remaining", {3}, id="remaining"),
+]
+
+
+@pytest.fixture
+def widget_with_decisions(create_widget):
+    """Cell 1 included, cell 2 excluded, cell 3 remaining."""
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()  # shows cell 1
+    widget.include_on_click()  # shows cell 2
+    widget.exclude_on_click()  # shows cell 3
+    assert widget.included == {1}
+    assert widget.excluded == {2}
+    assert widget.remaining == {3}
+    return widget
+
+
+def _show_click(widget, kind):
+    getattr(widget, f"show_{kind}_on_click")()
+
+
+@pytest.mark.parametrize("kind, ids", SHOW_KINDS)
+def test_show_cells(widget_with_decisions, kind, ids):
+    widget = widget_with_decisions
+    layers_before = len(widget.viewer.layers)
+
+    _show_click(widget, kind)
+
+    layer = getattr(widget, f"{kind}_layer")
+    assert getattr(widget, f"btn_show_{kind}").text() == "Back"
+    assert layer is not None
+    assert layer in widget.viewer.layers
+    assert len(widget.viewer.layers) == layers_before + 1
+    assert set(np.unique(layer.data)) - {0} == ids
+    assert layer.visible
+    assert not widget.layer_to_evaluate.visible
+    assert not widget.current_cell_layer.visible
+    assert not widget.btn_include.isEnabled()
+    assert not widget.btn_exclude.isEnabled()
+    assert not widget.btn_undo.isEnabled()
+
+
+@pytest.mark.parametrize("kind, ids", SHOW_KINDS)
+def test_hide_cells(widget_with_decisions, kind, ids):
+    widget = widget_with_decisions
+    layers_before = len(widget.viewer.layers)
+    _show_click(widget, kind)
+
+    _show_click(widget, kind)  # "Back"
+
+    assert (
+        getattr(widget, f"btn_show_{kind}").text()
+        == f"Show {kind.capitalize()}"
+    )
+    assert getattr(widget, f"{kind}_layer") is None
+    assert len(widget.viewer.layers) == layers_before
+    assert widget.layer_to_evaluate.visible
+    assert widget.current_cell_layer.visible
+    assert widget.viewer.layers.selection.active is widget.current_cell_layer
+    assert widget.btn_include.isEnabled()
+    assert widget.btn_exclude.isEnabled()
+    assert widget.btn_undo.isEnabled()
+
+
+def test_showing_one_kind_replaces_the_other(widget_with_decisions):
+    widget = widget_with_decisions
+    layers_before = len(widget.viewer.layers)
+    _show_click(widget, "included")
+
+    _show_click(widget, "excluded")
+
+    assert widget.included_layer is None
     assert widget.btn_show_included.text() == "Show Included"
-    assert not widget.included_layer
-    amount_of_layers = len(widget.viewer.layers)
-    widget.show_included_on_click()
-    assert widget.btn_show_included.text() == "Back"
-    assert len(widget.viewer.layers) == amount_of_layers + 1
-    assert widget.included_layer
-    mock_toggle.assert_called_once_with(False)
-
-
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@patch.object(CellAnalyzer, "set_visibility_label_layers")
-def test_hide_included_on_click(mock_toggle, create_started_widget):
-    widget = create_started_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    # This assumes that show_included_on_click works correctly
-    # for displaying the included cells
-    widget.show_included_on_click()
-    mock_toggle.reset_mock()
-    assert widget.btn_show_included.text() == "Back"
-    assert widget.included_layer
-    amount_of_layers = len(widget.viewer.layers)
-    widget.show_included_on_click()
-    assert widget.btn_show_included.text() == "Show Included"
-    assert len(widget.viewer.layers) == amount_of_layers - 1
-    assert not widget.included_layer
-    mock_toggle.assert_called_once_with(True)
-
-
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@patch.object(CellAnalyzer, "toggle_visibility_label_layers")
-def test_show_excluded_on_click(mock_toggle, create_started_widget):
-    widget = create_started_widget
-    assert widget.btn_show_excluded.text() == "Show Excluded"
-    assert not widget.excluded_layer
-    amount_of_layers = len(widget.viewer.layers)
-    widget.show_excluded_on_click()
+    assert widget.excluded_layer is not None
     assert widget.btn_show_excluded.text() == "Back"
-    assert len(widget.viewer.layers) == amount_of_layers + 1
-    assert widget.excluded_layer
-    mock_toggle.assert_called_once()
-
-
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@patch.object(CellAnalyzer, "toggle_visibility_label_layers")
-def test_hide_excluded_on_click(mock_toggle, create_started_widget):
-    widget = create_started_widget
-    # This assumes that show_excluded_on_click works correctly
-    # for displaying the excluded cells
-    widget.show_excluded_on_click()
-    mock_toggle.reset_mock()
-    assert widget.btn_show_excluded.text() == "Back"
-    assert widget.excluded_layer
-    amount_of_layers = len(widget.viewer.layers)
-    widget.show_excluded_on_click()
-    assert widget.btn_show_excluded.text() == "Show Excluded"
-    assert len(widget.viewer.layers) == amount_of_layers - 1
-    assert not widget.excluded_layer
-    mock_toggle.assert_called_once()
-
-
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@patch.object(CellAnalyzer, "toggle_visibility_label_layers")
-def test_show_remaining_on_click(mock_toggle, create_started_widget):
-    widget = create_started_widget
-    assert widget.btn_show_remaining.text() == "Show Remaining"
-    assert not widget.remaining_layer
-    amount_of_layers = len(widget.viewer.layers)
-    widget.show_remaining_on_click()
-    assert widget.btn_show_remaining.text() == "Back"
-    assert len(widget.viewer.layers) == amount_of_layers + 1
-    assert widget.remaining_layer
-    mock_toggle.assert_called_once()
-
-
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@patch.object(CellAnalyzer, "toggle_visibility_label_layers")
-def test_hide_remaining_on_click(mock_toggle, create_started_widget):
-    widget = create_started_widget
-    # This assumes that show_remaining_on_click works correctly
-    # for displaying the remaining cells
-    widget.show_remaining_on_click()
-    mock_toggle.reset_mock()
-    assert widget.btn_show_remaining.text() == "Back"
-    assert widget.remaining_layer
-    amount_of_layers = len(widget.viewer.layers)
-    widget.show_remaining_on_click()
-    assert widget.btn_show_remaining.text() == "Show Remaining"
-    assert len(widget.viewer.layers) == amount_of_layers - 1
-    assert not widget.remaining_layer
-    mock_toggle.assert_called_once()
+    assert len(widget.viewer.layers) == layers_before + 1
 
 
 @patch.object(QMessageBox, "exec_")
@@ -1014,28 +830,88 @@ def test_check_for_overlap(
     else:
         assert not retval
 
-@pytest.mark.skip("Old test")
-# TODO: Update test
-@pytest.mark.parametrize("current_ids", [[4], [3, 4], [2, 3, 4]])
-def test_get_overlap(create_started_widget, current_ids):
-    widget = create_started_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    widget.current_cell_layer.data[:] = 0
-    for id_ in current_ids:
-        indices = np.where(widget.layer_to_evaluate.data == id_)
-        widget.current_cell_layer.data[indices] = 100
-    widget.accepted_cells[:] = 0
-    accepted_ids = [1, 2, 3]
-    for id_ in accepted_ids:
-        indices = np.where(widget.layer_to_evaluate.data == id_)
-        widget.accepted_cells[indices] = 101
-    overlap_ids = set(current_ids) & set(accepted_ids)
-    print(overlap_ids)
-    combined_layer = widget.current_cell_layer.data + widget.accepted_cells
-    expected_overlap = set(
-        map(tuple, np.transpose(np.where(combined_layer == 201)))
+@pytest.fixture
+def widget_for_overlap(create_widget):
+    """Cell 1 is displayed; cell 2 occupies rows 3-4, columns 0-1."""
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="labels")
+    widget.start_analysis_on_click()
+    assert widget.current_cell_layer.selected_label == 1
+    return widget
+
+
+@pytest.mark.parametrize(
+    "painted, expected",
+    [
+        ([], set()),  # the cell itself does not overlap
+        ([(3, 0), (4, 1)], {(3, 0), (4, 1)}),  # painted over cell 2
+        ([(10, 10)], set()),  # painted on background
+    ],
+    ids=["none", "other_cell", "background"],
+)
+def test_get_overlap(widget_for_overlap, painted, expected):
+    widget = widget_for_overlap
+    for row, col in painted:
+        widget.current_cell_layer.data[row, col] = 1
+
+    assert widget.get_overlap() == expected
+
+
+@pytest.mark.parametrize(
+    "user_drawn, choice",
+    [(False, "Ok"), (True, "Ok"), (True, "Cancel")],
+)
+def test_handle_overlap(widget_for_overlap, user_drawn, choice):
+    widget = widget_for_overlap
+    widget.btn_segment.setText("Confirm")
+    widget.current_cell_layer.mode = "paint"
+    during = {}
+
+    with patch("mmv_h4cells._widget.QMessageBox") as box:
+
+        def dialog_shown():
+            during["evaluate_opacity"] = widget.layer_to_evaluate.opacity
+            during["current_opacity"] = widget.current_cell_layer.opacity
+            overlap_layers = [
+                layer
+                for layer in widget.viewer.layers
+                if layer.name == "Overlap"
+            ]
+            during["overlap_layers"] = len(overlap_layers)
+            during["overlap_pixels"] = np.argwhere(
+                overlap_layers[0].data
+            ).tolist()
+            return getattr(box, choice)
+
+        box.return_value.exec_.side_effect = dialog_shown
+        widget.handle_overlap({(3, 0)}, user_drawn)
+
+    box.return_value.setText.assert_called_once_with(
+        "Overlap detected and highlighted. Please remove the overlap!"
     )
-    assert widget.get_overlap() == expected_overlap
+    # while the dialog is shown the overlap is highlighted
+    assert during["evaluate_opacity"] < 0.3
+    assert during["current_opacity"] < 0.7
+    assert during["overlap_layers"] == 1
+    assert during["overlap_pixels"] == [[3, 0]]
+    # afterwards everything is restored
+    assert widget.current_cell_layer.opacity == 0.7
+    assert widget.layer_to_evaluate.opacity == 0.3
+    assert [layer.name for layer in widget.viewer.layers].count("Overlap") == 0
+    assert len(widget.viewer.layers.selection) == 1
+    assert widget.viewer.layers.selection.active is widget.current_cell_layer
+    if user_drawn:
+        box.return_value.setStandardButtons.assert_called_once()
+        box.return_value.setDefaultButton.assert_called_once_with(box.Ok)
+    else:
+        box.return_value.setStandardButtons.assert_not_called()
+        box.return_value.setDefaultButton.assert_not_called()
+    if choice == "Cancel":
+        assert widget.btn_segment.text() == "Draw own cell"
+        assert widget.current_cell_layer.mode == "pan_zoom"
+    else:
+        assert widget.btn_segment.text() == "Confirm"
+        assert widget.current_cell_layer.mode == "paint"
 
 
 @patch.object(CellAnalyzer, "calculate_metrics")
@@ -1054,57 +930,6 @@ def test_add_cell_to_accepted(
     assert len(widget.metric_data) == metrics_len + 1
     mock_update_labels.assert_called_once()
     mock_calculate_metrics.assert_called_once()
-
-
-@patch.object(QMessageBox, "setText")
-@patch.object(QMessageBox, "setStandardButtons")
-@patch.object(QMessageBox, "setDefaultButton")
-@pytest.mark.parametrize("overlap", [{}, {(0, 0)}])
-@pytest.mark.parametrize("user_drawn", [True, False])
-@pytest.mark.parametrize("return_value", [QMessageBox.Ok, QMessageBox.Cancel])
-@pytest.mark.parametrize("remaining", [{}, {10}])
-@pytest.mark.skip("Old test")
-# TODO: Update test
-def test_handle_overlap(
-    mock_set_default_button,
-    mock_set_standard_buttons,
-    mock_set_text,
-    create_started_widget,
-    overlap,
-    user_drawn,
-    return_value,
-    remaining,
-):
-    widget = create_started_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    widget.remaining = remaining
-
-    def test_side_effects():
-        assert widget.layer_to_evaluate.opacity < 0.3
-        assert widget.current_cell_layer.opacity < 0.7
-
-    with patch.object(
-        QMessageBox, "exec_", side_effect=test_side_effects
-    ) as mock_exec:
-        widget.handle_overlap(overlap, user_drawn)
-        mock_exec.assert_called_once()
-    mock_set_text.assert_called_once_with(
-        "Overlap detected and highlighted. Please remove the overlap!"
-    )
-    if user_drawn:
-        mock_set_standard_buttons.assert_called_once_with(
-            QMessageBox.Ok | QMessageBox.Cancel
-        )
-        mock_set_default_button.assert_called_once_with(QMessageBox.Cancel)
-        if return_value == QMessageBox.Cancel and len(widget.remaining) > 0:
-            assert widget.btn_segment.text() == "Draw own cell"
-            assert widget.current_cell_layer.mode == "pan_zoom"
-    assert widget.current_cell_layer.opacity == 0.7
-    assert widget.layer_to_evaluate.opacity == 0.3
-    with pytest.raises(ValueError):
-        widget.viewer.layers.index("Overlap")
-    assert len(widget.viewer.layers.selection) == 1
-    assert widget.viewer.layers.selection.active == widget.current_cell_layer
 
 
 class TestCalculateMetrics:
@@ -1169,6 +994,26 @@ def test_import_zarr_next_to_csv(create_widget, tmp_path):
         widget.import_on_click()
 
     _assert_imported(widget)
+
+
+def test_import_restores_session_state(create_widget, tmp_path):
+    widget = create_widget
+    _write_session(tmp_path / "session.zarr")
+    csv_path = str(tmp_path / "session.csv")
+
+    with patch("mmv_h4cells._widget.open_dialog", return_value=csv_path):
+        widget.import_on_click()
+
+    assert widget.metric_data == [(1, 4, (0, 0))]
+    assert widget.mean_size == 4.0
+    assert widget.std_size == 0.0
+    assert widget.undo_stack == [1, 2]
+    assert widget.selfdrawn_lower_bound == 4
+    assert widget.accepted_cells.shape == (10, 10)
+    assert set(np.unique(widget.accepted_cells)) == {0, 1}
+    assert set(np.unique(widget.rejected_cells)) == {0, 2}
+    assert widget.btn_export.isEnabled()
+    assert widget.lineedit_next_id.text() == "3"
 
 
 def test_import_asks_for_zarr_when_missing_next_to_csv(

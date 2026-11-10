@@ -19,30 +19,21 @@ from mmv_h4cells._writer import (
 
 
 @patch.object(QFileDialog, "getSaveFileName", return_value=("test.csv", ""))
-@pytest.mark.fatal
-@pytest.mark.skip("This test is not working")
-# TODO: Fix this test
-def test_save_dialog(mock_getSaveFileName):
+def test_save_dialog(mock_getSaveFileName, qapp):
     retval = save_dialog(None)
     assert retval == "test.csv"
     mock_getSaveFileName.assert_called_once()
 
 
 @patch.object(QFileDialog, "getSaveFileName", return_value=("test", ""))
-@pytest.mark.fatal
-@pytest.mark.skip("This test is not working")
-# TODO: Fix this test
-def test_save_dialog_no_extension(mock_getSaveFileName):
+def test_save_dialog_no_extension(mock_getSaveFileName, qapp):
     retval = save_dialog(None)
     assert retval == "test.csv"
     mock_getSaveFileName.assert_called_once()
 
 
 @patch.object(QFileDialog, "getSaveFileName", return_value=("", ""))
-@pytest.mark.fatal
-@pytest.mark.skip("This test is not working")
-# TODO: Fix this test
-def test_save_dialog_no_file(mock_getSaveFileName):
+def test_save_dialog_no_file(mock_getSaveFileName, qapp):
     retval = save_dialog(None)
     assert retval == ".csv"
     mock_getSaveFileName.assert_called_once()
