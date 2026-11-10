@@ -16,16 +16,7 @@ PATH = Path(__file__).parent / "data"
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
-    widget = CellAnalyzer(make_napari_viewer())
-    yield widget
-    # The viewer removes all layers on teardown, which would otherwise make
-    # the widget show its blocking "don't remove this layer" dialog.
-    try:
-        widget.viewer.layers.events.removed.disconnect(
-            widget.slot_layer_deleted
-        )
-    except (TypeError, ValueError, RuntimeError):
-        pass
+    yield CellAnalyzer(make_napari_viewer())
 
 
 @pytest.fixture
@@ -1326,3 +1317,80 @@ def test_display_next_cell_no_message_when_ignoring_jump_back(create_widget):
         widget.display_next_cell(True)
 
     mock_box.return_value.exec_.assert_not_called()
+
+# --- layer events ----------------------------------------------------------
+
+
+def _send(widget, event_type):
+    from qtpy.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendEvent(widget, QEvent(event_type))
+
+
+def test_layer_events_reconnected_after_hide_and_show(create_widget):
+    from qtpy.QtCore import QEvent
+
+    widget = create_widget
+    _send(widget, QEvent.Hide)
+    _send(widget, QEvent.Hide)  # hiding twice must not raise
+    layer = widget.viewer.add_labels(_labels(1, 2), name="labels")
+    assert widget.layer_to_evaluate is None  # ignored while hidden
+
+    _send(widget, QEvent.Show)
+
+    assert widget.layer_to_evaluate is layer
+    other = widget.viewer.add_labels(_labels(3), name="other")
+    assert widget.layer_to_evaluate is layer  # still connected, no change
+    widget.viewer.layers.remove(layer)
+    assert widget.layer_to_evaluate is other  # removal handled again
+
+
+def test_remove_label_layer_before_analysis_resets(create_widget):
+    widget = create_widget
+    layer = widget.viewer.add_labels(_labels(1, 2), name="labels")
+    assert widget.btn_start_analysis.isEnabled()
+
+    with patch("mmv_h4cells._widget.QMessageBox") as mock_box:
+        widget.viewer.layers.remove(layer)
+
+    mock_box.assert_not_called()
+    assert len(widget.viewer.layers) == 0
+    assert widget.layer_to_evaluate is None
+    assert widget.remaining == set()
+    assert widget.lineedit_next_id.text() == ""
+    assert not widget.btn_start_analysis.isEnabled()
+
+
+def test_clearing_layers_during_analysis_does_not_loop(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+
+    with patch("mmv_h4cells._widget.QMessageBox") as mock_box:
+        # a re-add loop would show dialogs forever: turn that into a failure
+        mock_box.return_value.exec_.side_effect = [None] * 3 + [
+            RuntimeError("layer removal loop")
+        ]
+        widget.viewer.layers.clear()
+
+    mock_box.assert_not_called()
+    assert len(widget.viewer.layers) == 0
+
+
+def test_removed_layers_are_restored_before_next_action(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+    evaluate_layer = widget.layer_to_evaluate
+    current_layer = widget.current_cell_layer
+
+    with patch("mmv_h4cells._widget.QMessageBox") as mock_box:
+        widget.viewer.layers.clear()
+        mock_box.assert_not_called()  # nothing shown on removal itself
+
+        widget.exclude_on_click()
+
+    mock_box.return_value.setText.assert_called_once()
+    assert evaluate_layer in widget.viewer.layers
+    assert current_layer in widget.viewer.layers
+    assert len(widget.excluded) == 1

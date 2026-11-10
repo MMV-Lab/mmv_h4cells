@@ -111,42 +111,97 @@ class CellAnalyzer(QWidget):
             if not condition:
                 viewer.bind_key(*custom_bind)
 
-        self.viewer.layers.events.inserted.connect(self.get_label_layer)
-        for layer in self.viewer.layers:
-            if isinstance(layer, Labels):
-                self.set_label_layer(layer)
-                break
-
-        self.viewer.layers.events.removed.connect(self.slot_layer_deleted)
+        self._layer_events_connected = False
+        self.connect_layer_events()
+        self.adopt_existing_label_layer()
         self.installEventFilter(self)
 
         self.logger.debug(f"CellAnalyzer v{version} initialized")
         self.logger.info("Ready to use")
 
-    def slot_layer_deleted(self, event):
-        def readd_layer(data, name):
-            self.logger.debug("Important layer removed")
-            msg = QMessageBox()
-            msg.setWindowTitle("napari")
-            msg.setText("Please don't remove this layer, we need it.")
-            msg.exec_()
-            return self.viewer.add_labels(data, name=name)
+    def connect_layer_events(self):
+        if self._layer_events_connected:
+            return
+        self.logger.debug("Connecting slots...")
+        self.viewer.layers.events.inserted.connect(self.get_label_layer)
+        self.viewer.layers.events.removed.connect(self.slot_layer_deleted)
+        self._layer_events_connected = True
 
+    def disconnect_layer_events(self):
+        if not self._layer_events_connected:
+            return
+        self.logger.debug("Disconnecting slots...")
+        self.viewer.layers.events.inserted.disconnect(self.get_label_layer)
+        self.viewer.layers.events.removed.disconnect(self.slot_layer_deleted)
+        self._layer_events_connected = False
+
+    def adopt_existing_label_layer(self):
+        """Use the first label layer of the viewer, if none is set yet."""
+        if self.layer_to_evaluate is not None:
+            return
+        for layer in self.viewer.layers:
+            if isinstance(layer, Labels):
+                self.set_label_layer(layer)
+                break
+
+    def slot_layer_deleted(self, event):
+        layer = event.value
         self.logger.debug("Layer deleted")
-        if event.value in [self.current_cell_layer, self.layer_to_evaluate]:
-            layer = readd_layer(event.value.data, event.value.name)
-            if event.value.name == self.layer_to_evaluate.name:
-                self.layer_to_evaluate = layer
-            else:
-                self.current_cell_layer = layer
+        if layer is self.layer_to_evaluate and self.current_cell_layer is None:
+            # analysis not started yet: nothing to protect, just forget it
+            self.logger.debug("Label layer removed before analysis")
+            self.reset_session()
+            self.adopt_existing_label_layer()
+        elif layer is self.layer_to_evaluate or layer is self.current_cell_layer:
+            # Do not re-add the layer here: the viewer removes all layers when
+            # it is closed or cleared, and re-adding would fight against that.
+            # The layer is restored before the next action instead.
+            self.logger.debug("Important layer removed")
+
+    def restore_missing_layers(self):
+        """Re-add the layers needed for the analysis if they were removed."""
+        missing = [
+            layer
+            for layer in (self.layer_to_evaluate, self.current_cell_layer)
+            if layer is not None and layer not in self.viewer.layers
+        ]
+        if not missing:
+            return
+        self.logger.debug("Restoring removed layers")
+        for layer in missing:
+            self.viewer.add_layer(layer)
+        msg = QMessageBox()
+        msg.setWindowTitle("napari")
+        msg.setText(
+            "Layers needed for the analysis were removed and have been "
+            "restored. Please don't remove them."
+        )
+        msg.exec_()
+
+    def reset_session(self):
+        """Forget the current label layer and all evaluation state."""
+        self.layer_to_evaluate = None
+        self.accepted_cells = None
+        self.rejected_cells = None
+        self.metric_data = []
+        self.mean_size = 0
+        self.std_size = 0
+        self.remaining = set()
+        self.included = set()
+        self.excluded = set()
+        self.undo_stack = []
+        self.next_id = None
+        self.selfdrawn_lower_bound = None
+        self.lineedit_next_id.setText("")
+        self.btn_start_analysis.setEnabled(False)
+        self.update_labels()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Hide:
-            self.logger.debug("Disconnecting slots...")
-            self.viewer.layers.events.inserted.disconnect(self.get_label_layer)
-            self.viewer.layers.events.removed.disconnect(
-                self.slot_layer_deleted
-            )
+            self.disconnect_layer_events()
+        elif event.type() == QEvent.Show:
+            self.connect_layer_events()
+            self.adopt_existing_label_layer()
         return super().eventFilter(source, event)
 
     def on_hotkey_include(self, _):
@@ -653,6 +708,7 @@ class CellAnalyzer(QWidget):
             Whether the cell was included successfully"""
         self.logger.debug("Including cell...")
         starttime_abs = time.time()
+        self.restore_missing_layers()
         if len(self.remaining) < 1:
             self.logger.info("No cell to include")
             msg = QMessageBox()
@@ -701,6 +757,7 @@ class CellAnalyzer(QWidget):
 
     def exclude_on_click(self):
         self.logger.debug("Excluding cell...")
+        self.restore_missing_layers()
         if len(self.remaining) < 1:
             self.logger.info("No cell to exclude")
             msg = QMessageBox()
@@ -737,6 +794,7 @@ class CellAnalyzer(QWidget):
 
     def undo_on_click(self):
         self.logger.debug("Undoing last action...")
+        self.restore_missing_layers()
         if len(self.undo_stack) == 0:
             self.logger.info("No actions to undo")
             return
@@ -898,6 +956,7 @@ class CellAnalyzer(QWidget):
             self.btn_undo.setEnabled(True)
 
     def include_multiple_on_click(self):
+        self.restore_missing_layers()
         self.logger.debug(
             f"Including multiple cells for input {self.lineedit_include.text()}"
         )
@@ -991,6 +1050,7 @@ class CellAnalyzer(QWidget):
         return included, ignored, overlapped, faulty
 
     def draw_own_cell(self):
+        self.restore_missing_layers()
         if self.btn_segment.text() == "Draw own cell":
             self.logger.debug("Draw own cell initialized")
             self.btn_segment.setText("Confirm")
