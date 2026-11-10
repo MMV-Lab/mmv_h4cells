@@ -1,6 +1,7 @@
 import numpy as np
 import csv
 import locale
+import warnings
 from typing import List, Tuple
 import tifffile
 from pathlib import Path
@@ -57,13 +58,31 @@ def get_writer(path: Path):
     return None
 
 
+def uses_german_locale() -> bool:
+    """Whether the system locale is German (decimal comma, ';' delimiter).
+
+    Locale information may be missing (e.g. no locale environment variables),
+    in which case the English format is used.
+    """
+    names = []
+    # getdefaultlocale is deprecated and will be removed in Python 3.15
+    get_default = getattr(locale, "getdefaultlocale", None)
+    if get_default is not None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            names.append(get_default()[0])
+    names.append(locale.getlocale()[0])
+    return any(
+        name and name.lower().startswith(("de", "german")) for name in names
+    )
+
+
 def write_csv(
     path: Path,
     data: List[Tuple[int, int, Tuple[int, int]]],
     metrics: Tuple[float, float, float],
 ):  # adjust if Metrics are added
-    default_locale = locale.getdefaultlocale()[0]
-    if default_locale.startswith("de"):
+    if uses_german_locale():
         data = [convert_np64_to_string(sublist) for sublist in data]
         delimiter = ";"
     else:

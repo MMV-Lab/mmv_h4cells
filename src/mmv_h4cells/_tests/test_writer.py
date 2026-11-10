@@ -105,3 +105,36 @@ def test_write_tiff(tmp_path):
     data = BioImage(path).get_image_data("YX")
     assert data.dtype == np.uint16
     assert np.array_equal(data, array)
+
+
+@pytest.mark.parametrize(
+    "default, current",
+    [((None, None), (None, None)), ((None, "UTF-8"), (None, None))],
+)
+def test_write_csv_without_locale_information(tmp_path, default, current):
+    path = tmp_path / "out.csv"
+
+    with patch("locale.getdefaultlocale", return_value=default), patch(
+        "locale.getlocale", return_value=current
+    ):
+        write_csv(path, [(1, 4, (0, 0))], (4.0, 0.0, 0))
+
+    lines = path.read_text().splitlines()
+    assert lines[0] == "ID,Size [px],Centroid,"
+
+
+@pytest.mark.parametrize(
+    "default, current",
+    [(("de_DE", "cp1252"), (None, None)), ((None, None), ("German_Germany", "1252"))],
+)
+def test_write_csv_german_locale(tmp_path, default, current):
+    path = tmp_path / "out.csv"
+
+    with patch("locale.getdefaultlocale", return_value=default), patch(
+        "locale.getlocale", return_value=current
+    ):
+        write_csv(path, [(1, np.float64(2.5), (0, 0))], (4.0, 0.0, 0))
+
+    lines = path.read_text().splitlines()
+    assert lines[0].startswith("ID;Size [px]")
+    assert "2,5" in lines[1]
