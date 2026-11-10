@@ -804,9 +804,14 @@ class CellAnalyzer(QWidget):
         if last_evaluated < self.selfdrawn_lower_bound:
             self.logger.debug("Adding cell back to remaining")
             self.remaining.add(last_evaluated)
-        if last_evaluated in self.accepted_cells:
+        if last_evaluated in self.included:
             self.logger.debug("Removing cell from accepted")
-            self.metric_data.pop(-1)
+            # metric_data is not ordered by inclusion (export sorts it by id)
+            self.metric_data = [
+                entry
+                for entry in self.metric_data
+                if entry[0] != last_evaluated
+            ]
             indices = np.where(self.accepted_cells == last_evaluated)
             self.accepted_cells[indices] = 0
             self.included.remove(last_evaluated)

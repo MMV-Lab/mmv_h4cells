@@ -1394,3 +1394,38 @@ def test_removed_layers_are_restored_before_next_action(create_widget):
     assert evaluate_layer in widget.viewer.layers
     assert current_layer in widget.viewer.layers
     assert len(widget.excluded) == 1
+
+# --- undo ----------------------------------------------------------------
+
+
+def _include_in_order(widget, ids):
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+    widget.include_multiple(ids)
+
+
+def test_undo_removes_metrics_of_undone_cell(create_widget):
+    widget = create_widget
+    _include_in_order(widget, [3, 1])
+
+    widget.undo_on_click()  # undoes cell 1
+
+    assert [entry[0] for entry in widget.metric_data] == [3]
+    assert widget.included == {3}
+    assert 1 in widget.remaining
+
+
+def test_undo_after_export_removes_metrics_of_undone_cell(create_widget):
+    widget = create_widget
+    _include_in_order(widget, [3, 1])  # last included is not the highest id
+
+    # export sorts the metric data by id
+    with patch(
+        "mmv_h4cells._widget.save_dialog", return_value="out.csv"
+    ), patch("mmv_h4cells._widget.write"):
+        widget.export_on_click()
+    widget.undo_on_click()  # undoes cell 1
+
+    assert [entry[0] for entry in widget.metric_data] == [3]
+    assert widget.included == {3}
+    assert widget.mean_size == 4  # only cell 3 (4 px) is left
