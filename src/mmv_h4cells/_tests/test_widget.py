@@ -276,9 +276,15 @@ def test_include_on_click(
         mock_msg.assert_called_once()
         return
     mock_check.assert_called_once()
-    mock_include.assert_called_once_with(
-        1, widget.current_cell_layer.data, not user_drawn
-    )
+    mock_include.assert_called_once()
+    cell_id, region, remove_from_remaining = mock_include.call_args.args
+    box = mock_include.call_args.kwargs["box"]
+    current = widget.current_cell_layer.data
+    assert cell_id == 1
+    assert remove_from_remaining == (not user_drawn)
+    # the cell is passed as the region inside its bounding box
+    assert np.array_equal(region, current[box])
+    assert np.count_nonzero(current[box]) == np.count_nonzero(current)
 
     if remaining == {1, 2}:
         mock_display.assert_called_once()
@@ -681,6 +687,7 @@ def test_include_multiple_overlap(create_widget_in_analysis):
     widget.layer_to_evaluate.data[1, 1] = 3
     widget.layer_to_evaluate.data[2, 2] = 4
     widget.layer_to_evaluate.data[3, 3] = 4
+    widget.invalidate_boxes()  # the array was changed in place
     widget.accepted_cells[:] = 0
     widget.accepted_cells[0, 0] = 5
     widget.accepted_cells[1, 1] = 5
@@ -1571,3 +1578,169 @@ def test_import_keeps_the_stored_selfdrawn_bound(create_widget, tmp_path):
         widget.import_on_click()
 
     assert widget.selfdrawn_lower_bound == 7
+
+
+# --- bounding boxes ----------------------------------------------------------
+
+
+def _random_cells(seed=0, size=60, count=8):
+    rng = np.random.default_rng(seed)
+    data = np.zeros((size, size), dtype=np.int32)
+    yy, xx = np.mgrid[0:size, 0:size]
+    for id_ in range(1, count + 1):
+        cy, cx = rng.integers(8, size - 8, 2)
+        ry, rx = rng.integers(3, 9, 2)
+        blob = ((yy - cy) / ry) ** 2 + ((xx - cx) / rx) ** 2 <= 1
+        data[blob & (data == 0)] = id_ * 3  # ids with gaps
+    return data
+
+
+def test_cell_boxes_are_exact(create_widget):
+    widget = create_widget
+    data = _random_cells()
+    widget.viewer.add_labels(data, name="labels")
+
+    for id_ in np.unique(data)[1:]:
+        coords = np.nonzero(data == id_)
+        expected = tuple(slice(c.min(), c.max() + 1) for c in coords)
+        assert widget.cell_box(int(id_)) == expected
+    assert widget.cell_box(9999) is None
+
+
+def test_cell_boxes_include_excluded_cells_of_an_imported_session(
+    create_widget,
+):
+    widget = create_widget
+    data = _labels(1, 3)
+    widget.viewer.add_labels(data, name="labels")
+    widget.rejected_cells[10:12, 5:8] = 2  # an excluded cell, not in the layer
+    widget.invalidate_boxes()
+
+    assert widget.cell_box(2) == (slice(10, 12), slice(5, 8))
+
+
+def test_cell_box_falls_back_to_searching(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="labels")
+
+    with patch("mmv_h4cells._widget.MAX_CACHED_LABEL", 0):  # no index at all
+        widget.invalidate_boxes()
+        assert widget.get_boxes() == {}
+        assert widget.cell_box(2) == (slice(3, 5), slice(0, 2))
+    assert widget.get_boxes()[2] == (slice(3, 5), slice(0, 2))  # remembered
+
+
+def test_boxes_are_recomputed_after_the_layer_changes(create_widget):
+    widget = create_widget
+    layer = widget.viewer.add_labels(_labels(1, 2), name="labels")
+    assert widget.cell_box(1) == (slice(0, 2), slice(0, 2))
+
+    layer.events.paint(value=[])  # the user painted in the layer
+    assert widget._boxes is None
+    assert widget.cell_box(1) == (slice(0, 2), slice(0, 2))
+
+    new_data = np.zeros_like(layer.data)
+    new_data[10:13, 10:13] = 1
+    layer.data = new_data  # the data was replaced
+    assert widget._boxes is None
+    assert widget.cell_box(1) == (slice(10, 13), slice(10, 13))
+
+
+def test_get_overlap_matches_the_full_image_computation(create_widget):
+    """Compare with the previous implementation, which scanned everything."""
+    widget = create_widget
+    data = _random_cells(seed=1)
+    widget.viewer.add_labels(data, name="labels")
+    widget.start_analysis_on_click()
+    rng = np.random.default_rng(5)
+
+    for _ in range(10):
+        id_ = int(rng.choice(np.unique(data)[1:]))
+        widget.display_cell(id_)
+        # paint some random pixels with the cell's label
+        ys, xs = rng.integers(0, data.shape[0], (2, 40))
+        widget.current_cell_layer.data[ys, xs] = id_
+
+        current = widget.current_cell_layer.data
+        eval_cells = np.copy(widget.layer_to_evaluate.data)
+        eval_cells[eval_cells == id_] = 0
+        combined = np.zeros_like(data)
+        combined[np.nonzero(current)] += 1
+        combined[np.nonzero(eval_cells)] += 1
+        expected = set(map(tuple, np.transpose(np.where(combined == 2))))
+
+        assert widget.get_overlap() == expected
+
+
+def test_display_cell_centers_the_camera_on_the_cell(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="labels")
+    widget.start_analysis_on_click()
+
+    widget.display_cell(2)  # rows 3-4, columns 0-1
+
+    center = tuple(widget.viewer.camera.center)[-2:]
+    assert center == pytest.approx((3.5, 0.5))
+    shown = widget.current_cell_layer.data
+    assert set(np.unique(shown)) == {0, 2}
+    assert np.count_nonzero(shown) == 4
+
+
+def test_pixels_painted_outside_the_box_survive_exclude_and_undo(
+    create_widget,
+):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()  # cell 1 is displayed
+    widget.current_cell_layer.data[15, 15] = 1  # far outside the cell's box
+
+    widget.exclude_on_click()
+    assert widget.rejected_cells[15, 15] == 1
+    assert widget.layer_to_evaluate.data[15, 15] == 0
+
+    widget.undo_on_click()
+    assert not widget.rejected_cells.any()
+    assert widget.layer_to_evaluate.data[15, 15] == 1
+
+
+@pytest.mark.parametrize("action", ["include_on_click", "exclude_on_click"])
+def test_empty_current_cell_layer_is_reported(create_widget, action):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="labels")
+    widget.start_analysis_on_click()
+    widget.current_cell_layer.data[:] = 0  # the cell was erased
+
+    with patch("mmv_h4cells._widget.QMessageBox") as box:
+        getattr(widget, action)()
+
+    box.return_value.setText.assert_called_once_with(
+        "No cell found in the current cell layer."
+    )
+    assert widget.included == set()
+    assert widget.excluded == set()
+    assert widget.remaining == {1, 2}
+
+
+def test_cells_of_3d_images_can_be_evaluated(create_widget):
+    widget = create_widget
+    volume = np.zeros((4, 10, 10), dtype=np.int32)
+    volume[0:2, 1:3, 1:3] = 1
+    volume[2:4, 5:8, 5:8] = 2
+    original = volume.copy()
+    widget.viewer.add_labels(volume, name="volume")
+    widget.start_analysis_on_click()
+
+    widget.include_on_click()  # cell 1
+    widget.exclude_on_click()  # cell 2
+    assert widget.included == {1}
+    assert widget.excluded == {2}
+    assert widget.metric_data[0][1] == 8  # voxels
+    assert widget.metric_data[0][2] == (0, 1, 1)  # centroid (z, y, x)
+    assert np.count_nonzero(widget.accepted_cells) == 8
+    assert np.count_nonzero(widget.rejected_cells) == 18
+
+    widget.undo_on_click()
+    widget.undo_on_click()
+    assert not widget.accepted_cells.any()
+    assert not widget.rejected_cells.any()
+    assert np.array_equal(widget.layer_to_evaluate.data, original)

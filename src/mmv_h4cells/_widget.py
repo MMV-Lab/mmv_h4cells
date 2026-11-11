@@ -31,6 +31,11 @@ from scipy import ndimage
 import time
 
 
+# Label images with larger ids than this are not indexed by bounding box
+# (the lookup then searches the arrays for each cell)
+MAX_CACHED_LABEL = 10_000_000
+
+
 class CellAnalyzer(QWidget):
     def __init__(self, viewer: napari.viewer.Viewer):
         super().__init__()
@@ -82,6 +87,9 @@ class CellAnalyzer(QWidget):
         self.included: Set[int] = set()  # set of all included cell ids
         self.excluded: Set[int] = set()  # set of all excluded cell ids
         self.undo_stack: List[int] = []  # stack of cell ids to undo
+        # bounding box of every cell (computed lazily, see get_boxes)
+        self._boxes = None
+        self._watched_layer = None
 
         self.next_id: int = None  # computed id of the next cell to evaluate
 
@@ -163,6 +171,8 @@ class CellAnalyzer(QWidget):
     def reset_session(self):
         """Forget the current label layer and all evaluation state."""
         self.layer_to_evaluate = None
+        self._boxes = None
+        self.watch_layer_edits(None)
         self.accepted_cells = None
         self.rejected_cells = None
         self.metric_data = []
@@ -479,6 +489,112 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Label layer is valid")
         self.set_label_layer(event.value)
 
+    # --- bounding boxes ---------------------------------------------------
+    # Images can be very large (hundreds of megapixels) while a cell only
+    # covers a tiny part of it. All per-cell work is therefore done on the
+    # cell's bounding box instead of the whole image.
+
+    def watch_layer_edits(self, layer):
+        """Invalidate the boxes when the label layer is painted or replaced.
+
+        Code that modifies the array of the layer in place (without napari
+        noticing) has to call invalidate_boxes afterwards.
+        """
+        if layer is self._watched_layer:
+            return
+        for event_name in ("paint", "data"):
+            if self._watched_layer is not None:
+                try:
+                    getattr(
+                        self._watched_layer.events, event_name
+                    ).disconnect(self.invalidate_boxes)
+                except (AttributeError, TypeError, ValueError, RuntimeError):
+                    pass
+            event = getattr(getattr(layer, "events", None), event_name, None)
+            if event is not None:
+                event.connect(self.invalidate_boxes)
+        self._watched_layer = layer
+
+    def invalidate_boxes(self, event=None):
+        self._boxes = None
+
+    @staticmethod
+    def box_from_coords(coords) -> Tuple[slice, ...]:
+        """Bounding box (tuple of slices) of the result of np.nonzero."""
+        return tuple(slice(int(c.min()), int(c.max()) + 1) for c in coords)
+
+    @staticmethod
+    def union_boxes(box_a, box_b) -> Tuple[slice, ...]:
+        return tuple(
+            slice(min(a.start, b.start), max(a.stop, b.stop))
+            for a, b in zip(box_a, box_b)
+        )
+
+    def get_boxes(self) -> dict:
+        """Bounding box of each cell id, computed once per label layer.
+
+        Boxes stay valid while cells move between the working layer and the
+        accepted / rejected masks, as the pixels stay inside their box.
+        """
+        if self._boxes is not None:
+            return self._boxes
+        boxes = {}
+        if self.layer_to_evaluate is not None:
+            arrays = [self.layer_to_evaluate.data]
+            if self.rejected_cells is not None:
+                arrays.append(self.rejected_cells)
+            for array in arrays:
+                if array.size == 0 or int(array.max()) > MAX_CACHED_LABEL:
+                    continue  # cell_box falls back to searching
+                for label, box in enumerate(
+                    ndimage.find_objects(array), start=1
+                ):
+                    if box is not None and label not in boxes:
+                        boxes[label] = box
+        self._boxes = boxes
+        return boxes
+
+    def cell_box(self, cell_id: int):
+        """Bounding box of a cell, or None if the cell cannot be found."""
+        boxes = self.get_boxes()
+        box = boxes.get(cell_id)
+        if box is not None:
+            return box
+        for array in (
+            self.layer_to_evaluate.data,
+            self.rejected_cells,
+            self.accepted_cells,
+        ):
+            if array is None:
+                continue
+            coords = np.nonzero(array == cell_id)
+            if len(coords[0]):
+                box = self.box_from_coords(coords)
+                boxes[cell_id] = box
+                return box
+        return None
+
+    def remember_box(self, cell_id: int, box):
+        """Make sure the cached box of a cell covers the given box."""
+        boxes = self.get_boxes()
+        known = boxes.get(cell_id)
+        boxes[cell_id] = box if known is None else self.union_boxes(known, box)
+
+    def get_current_cell(self):
+        """Labels in the current cell layer and their bounding box.
+
+        Returns
+        -------
+        (set of int, tuple of slices or None)
+            None as box if the layer is empty.
+        """
+        data = self.current_cell_layer.data
+        coords = np.nonzero(data)
+        if len(coords[0]) == 0:
+            return set(), None
+        labels = {int(v) for v in np.unique(data[coords])}
+        return labels, self.box_from_coords(coords)
+
     def has_session_state(self) -> bool:
         """Whether cells were already evaluated (e.g. an imported session)."""
         return bool(self.metric_data or self.excluded or self.undo_stack)
@@ -488,6 +604,8 @@ class CellAnalyzer(QWidget):
         starttime = time.time()
         layer_changed = layer is not self.layer_to_evaluate
         self.layer_to_evaluate = layer
+        self._boxes = None
+        self.watch_layer_edits(layer)
         self.btn_start_analysis.setEnabled(True)
         unique_ids = np.unique(self.layer_to_evaluate.data)
         self.logger.debug(f"{len(unique_ids)} unique ids found")
@@ -613,16 +731,19 @@ class CellAnalyzer(QWidget):
     def display_cell(self, cell_id: int):
         self.logger.debug(f"Displaying cell {cell_id}")
         self.current_cell_layer.data[:] = 0
-        indices = np.where(self.layer_to_evaluate.data == cell_id)
-        self.current_cell_layer.data[indices] = cell_id
+        centroid = None
+        box = self.cell_box(cell_id)
+        if box is not None:
+            mask = self.layer_to_evaluate.data[box] == cell_id
+            self.current_cell_layer.data[box][mask] = cell_id
+            centroid = tuple(
+                float(c) + s.start
+                for c, s in zip(ndimage.center_of_mass(mask), box)
+            )
         self.current_cell_layer.opacity = 0.7
         self.current_cell_layer.refresh()
-        centroid = ndimage.center_of_mass(
-            self.current_cell_layer.data,
-            labels=self.current_cell_layer.data,
-            index=cell_id,
-        )
-        self.viewer.camera.center = centroid
+        if centroid is not None:
+            self.viewer.camera.center = centroid
         self.logger.debug(f"Centroid: {centroid}")
         self.viewer.camera.zoom = 7.5  # !!
         self.current_cell_layer.selected_label = cell_id
@@ -764,13 +885,22 @@ class CellAnalyzer(QWidget):
             msg.exec_()
             return False
 
-        if self.check_for_overlap(self_drawn):
+        current = self.get_current_cell()
+        if self.check_for_overlap(self_drawn, current):
             return False
 
         endtime = time.time()
         self.logger.debug(f"Runtime overlap check: {endtime - starttime_abs}")
         starttime = time.time()
-        if len(pd.unique(self.current_cell_layer.data.flatten())) > 2:
+        labels, box = current
+        if not labels:
+            self.logger.debug("Current cell layer is empty")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("No cell found in the current cell layer.")
+            msg.exec_()
+            return False
+        if len(labels) > 1:
             self.logger.debug("Multiple ids in current cell layer")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
@@ -791,10 +921,11 @@ class CellAnalyzer(QWidget):
         endtime = time.time()
         self.logger.debug(f"Runtime multiple ids check: {endtime - starttime}")
         starttime = time.time()
-        id_ = int(np.max(self.current_cell_layer.data))
-        self.include(id_, self.current_cell_layer.data, not self_drawn)
+        id_ = max(labels)
+        region = self.current_cell_layer.data[box]
+        self.include(id_, region, not self_drawn, box=box)
         if self_drawn:
-            self.layer_to_evaluate.data += self.current_cell_layer.data
+            self.layer_to_evaluate.data[box] += region
         endtime = time.time()
         self.logger.debug(f"Runtime include: {endtime - starttime}")
 
@@ -823,8 +954,15 @@ class CellAnalyzer(QWidget):
             msg.exec_()
             return
 
-        unique_ids = pd.unique(self.current_cell_layer.data.flatten())
-        if len(unique_ids) > 2:
+        labels, box = self.get_current_cell()
+        if not labels:
+            self.logger.debug("Current cell layer is empty")
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("No cell found in the current cell layer.")
+            msg.exec_()
+            return
+        if len(labels) > 1:
             self.logger.debug("Multiple ids in current cell layer")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
@@ -834,15 +972,16 @@ class CellAnalyzer(QWidget):
             msg.exec_()
             return
 
-        current_id = int(max(unique_ids))
+        current_id = max(labels)
         self.excluded.add(current_id)
         self.remaining.remove(current_id)
         self.undo_stack.append(current_id)
         self.update_undo_button()
 
-        mask = np.where(self.current_cell_layer.data == current_id)
-        self.rejected_cells[mask] = current_id
-        self.layer_to_evaluate.data[mask] = 0
+        self.remember_box(current_id, box)
+        mask = self.current_cell_layer.data[box] == current_id
+        self.rejected_cells[box][mask] = current_id
+        self.layer_to_evaluate.data[box][mask] = 0
         self.layer_to_evaluate.refresh()
 
         self.update_labels()
@@ -859,6 +998,7 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Before undo:")
         self.logger.debug(f"Last evaluated: {self.undo_stack[-1]}")
         last_evaluated = self.undo_stack.pop(-1)
+        box = self.cell_box(last_evaluated)
         if last_evaluated < self.selfdrawn_lower_bound:
             self.logger.debug("Adding cell back to remaining")
             self.remaining.add(last_evaluated)
@@ -870,18 +1010,22 @@ class CellAnalyzer(QWidget):
                 for entry in self.metric_data
                 if entry[0] != last_evaluated
             ]
-            indices = np.where(self.accepted_cells == last_evaluated)
-            self.accepted_cells[indices] = 0
             self.included.remove(last_evaluated)
+            if box is not None:
+                accepted = self.accepted_cells[box]
+                accepted[accepted == last_evaluated] = 0
             if last_evaluated >= self.selfdrawn_lower_bound:
-                mask = np.where(self.layer_to_evaluate.data == last_evaluated)
-                self.layer_to_evaluate.data[mask] = 0
+                if box is not None:
+                    working = self.layer_to_evaluate.data[box]
+                    working[working == last_evaluated] = 0
                 self.layer_to_evaluate.refresh()
         else:
             self.excluded.remove(last_evaluated)
-            mask = np.where(self.rejected_cells == last_evaluated)
-            self.layer_to_evaluate.data[mask] = last_evaluated
-            self.rejected_cells[mask] = 0
+            if box is not None:
+                rejected = self.rejected_cells[box]
+                mask = rejected == last_evaluated
+                self.layer_to_evaluate.data[box][mask] = last_evaluated
+                rejected[mask] = 0
         self.lineedit_next_id.setText(str(last_evaluated))
 
         self.calculate_metrics()
@@ -1092,7 +1236,8 @@ class CellAnalyzer(QWidget):
         ignored = set()
         overlapped = set()
         faulty = set()
-        existing_ids = set(pd.unique(self.layer_to_evaluate.data.flatten()))
+        # the working layer contains the remaining and the included cells
+        existing_ids = self.remaining | self.included
         for val in ids:
             if val == 0:
                 continue
@@ -1102,13 +1247,17 @@ class CellAnalyzer(QWidget):
             if val not in self.remaining:
                 ignored.add(val)
                 continue
-            indices = np.where(self.layer_to_evaluate.data == val)
-            if np.sum(self.accepted_cells[indices]):
+            box = self.cell_box(val)
+            if box is None:
+                faulty.add(val)
+                continue
+            mask = self.layer_to_evaluate.data[box] == val
+            if self.accepted_cells[box][mask].any():
                 overlapped.add(val)
                 continue
-            data_array = np.zeros_like(self.layer_to_evaluate.data)
-            data_array[indices] = val
-            self.include(val, data_array)
+            data_array = np.zeros(mask.shape, dtype=self.accepted_cells.dtype)
+            data_array[mask] = val
+            self.include(val, data_array, box=box)
             included.add(val)
             self.undo_stack.append(val)
         self.logger.debug("Multiple cells evaluated")
@@ -1270,18 +1419,28 @@ class CellAnalyzer(QWidget):
         id_: int,
         data_array: np.ndarray,
         remove_from_remaining: bool = True,
+        box=None,
     ):
+        """Include a cell.
+
+        data_array is the cell's pixels: the whole image, or, if box (a tuple
+        of slices) is given, only the region of the image inside that box.
+        """
         self.logger.debug("Including cell...")
-        self.accepted_cells += data_array
+        if box is None:
+            self.accepted_cells += data_array
+        else:
+            self.accepted_cells[box] += data_array
+            self.remember_box(id_, box)
         if remove_from_remaining:
             self.remaining.remove(id_)
         self.included.add(id_)
 
-        self.add_cell_to_accepted(id_, data_array)
+        self.add_cell_to_accepted(id_, data_array, box)
 
-    def check_for_overlap(self, self_drawn=False):
+    def check_for_overlap(self, self_drawn=False, current=None):
         self.logger.debug("Checking for overlap...")
-        overlap = self.get_overlap()
+        overlap = self.get_overlap(current)
 
         if not overlap:
             return False
@@ -1289,9 +1448,14 @@ class CellAnalyzer(QWidget):
         self.handle_overlap(overlap, self_drawn)
         return True
 
-    def get_overlap(self):
+    def get_overlap(self, current=None):
         """
-        Returns the indices of the overlapping pixels between the current cell and the accepted cells.
+        Returns the indices of the pixels of the current cell that overlap with other cells.
+
+        Parameters:
+        -----------
+        current: tuple, optional
+            Result of get_current_cell, if it was already computed.
 
         Returns:
         --------
@@ -1299,22 +1463,31 @@ class CellAnalyzer(QWidget):
             A set of tuples containing the indices of the overlapping pixels.
         """
         self.logger.debug("Calculating overlap...")
-        nonzero_current = np.nonzero(self.current_cell_layer.data)
-        eval_cells = np.copy(self.layer_to_evaluate.data)
+        _, box = current if current is not None else self.get_current_cell()
+        if box is None:
+            return set()
+        current_cell = self.current_cell_layer.data[box]
+        other_cells = self.layer_to_evaluate.data[box]
         id_ = self.current_cell_layer.selected_label
-        eval_cells[eval_cells == id_] = 0
-        nonzero_eval = np.nonzero(eval_cells)
-        combined_layer = np.zeros_like(self.layer_to_evaluate.data)
-        combined_layer[nonzero_current] += 1
-        combined_layer[nonzero_eval] += 1
-        overlap = set(map(tuple, np.transpose(np.where(combined_layer == 2))))
-        return overlap
+        overlapping = (
+            (current_cell != 0) & (other_cells != 0) & (other_cells != id_)
+        )
+        offset = [s.start for s in box]
+        return {
+            tuple(int(c) + o for c, o in zip(coords, offset))
+            for coords in np.argwhere(overlapping)
+        }
 
-    def add_cell_to_accepted(self, cell_id: int, data: np.ndarray):
+    def add_cell_to_accepted(self, cell_id: int, data: np.ndarray, box=None):
+        """Add a cell to the accepted ones.
+
+        If box is given, data only covers that part of the image.
+        """
         self.logger.debug("Adding cell to list of accepted...")
         self.included.add(cell_id)
         centroid = ndimage.center_of_mass(data)
-        centroid = tuple(int(value) for value in centroid)
+        offset = [0] * len(centroid) if box is None else [s.start for s in box]
+        centroid = tuple(int(c + o) for c, o in zip(centroid, offset))
         self.metric_data.append(  # TODO
             (
                 cell_id,
