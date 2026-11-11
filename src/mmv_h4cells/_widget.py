@@ -91,25 +91,7 @@ class CellAnalyzer(QWidget):
 
         self.initialize_ui()
 
-        # Hotkeys
-
-        hotkeys = self.viewer.keymap.keys()
-        self.logger.debug(f"Current hotkeys: {hotkeys}")
-        custom_binds = [
-            ("K", self.on_hotkey_include),
-            ("G", self.on_hotkey_exclude),
-            ("H", self.on_hotkey_undo),
-            ("J", self.toggle_visibility_label_layers_hotkey),
-        ]
-        for custom_bind in custom_binds:
-            napari_ver = napari.__version__.split(".")
-            if int(napari_ver[0]) == 0 and int(napari_ver[1]) < 5:
-                condition = custom_bind[0] in hotkeys
-            else:
-                custom_bind_keys = [bind.to_text() for bind in self.viewer.keymap]
-                condition = custom_bind[0] in custom_bind_keys
-            if not condition:
-                viewer.bind_key(*custom_bind)
+        self.bind_hotkeys()
 
         self._layer_events_connected = False
         self.connect_layer_events()
@@ -195,14 +177,31 @@ class CellAnalyzer(QWidget):
         self.lineedit_next_id.setText("")
         self.btn_start_analysis.setEnabled(False)
         self.update_labels()
+        self.update_undo_button()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Hide:
             self.disconnect_layer_events()
         elif event.type() == QEvent.Show:
+            self.bind_hotkeys()
             self.connect_layer_events()
             self.adopt_existing_label_layer()
         return super().eventFilter(source, event)
+
+    def bind_hotkeys(self):
+        """Bind the hotkeys to this widget.
+
+        Existing bindings are overwritten: napari may create a new widget when
+        the panel is reopened, and the old bindings would still point to the
+        previous (hidden or deleted) widget.
+        """
+        for key, callback in (
+            ("K", self.on_hotkey_include),
+            ("G", self.on_hotkey_exclude),
+            ("H", self.on_hotkey_undo),
+            ("J", self.toggle_visibility_label_layers_hotkey),
+        ):
+            self.viewer.bind_key(key, callback, overwrite=True)
 
     def on_hotkey_include(self, _):
         if self.btn_include.isEnabled():
@@ -505,6 +504,22 @@ class CellAnalyzer(QWidget):
         endtime = time.time()
         self.logger.debug(f"Runtime set label layer: {endtime - starttime}")
 
+    def update_undo_button(self):
+        """Enable Undo only if there is something to undo."""
+        showing_other_layer = any(
+            layer is not None
+            for layer in (
+                self.included_layer,
+                self.excluded_layer,
+                self.remaining_layer,
+            )
+        )
+        self.btn_undo.setEnabled(
+            len(self.undo_stack) > 0
+            and self.current_cell_layer is not None
+            and not showing_other_layer
+        )
+
     def update_labels(self):
         self.logger.debug("Updating labels...")
         self.label_amount_excluded.setText(str(len(self.excluded)))
@@ -550,7 +565,6 @@ class CellAnalyzer(QWidget):
         self.btn_import.setEnabled(False)
         self.btn_export.setEnabled(True)
         self.btn_show_included.setEnabled(True)
-        self.btn_undo.setEnabled(True)
         self.btn_show_excluded.setEnabled(True)
         self.btn_show_remaining.setEnabled(True)
         self.btn_segment.setEnabled(True)
@@ -561,6 +575,7 @@ class CellAnalyzer(QWidget):
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.layer_to_evaluate.data), name="Current Cell"
         )
+        self.update_undo_button()
         if not start_id in self.remaining:
             self.logger.warning("Start id not in remaining ids")
             lower_ids = {value for value in self.remaining if value < start_id}
@@ -605,7 +620,12 @@ class CellAnalyzer(QWidget):
 
     def import_on_click(self):
         self.logger.debug("Importing data...")
-        csv_filepath = Path(open_dialog(self))
+        csv_filepath = Path(
+            open_dialog(
+                self,
+                title="Import: select the .csv file of an exported session",
+            )
+        )
         if str(csv_filepath) == ".":
             self.logger.debug("No csv file selected. Aborting.")
             return
@@ -614,7 +634,23 @@ class CellAnalyzer(QWidget):
             session = read(zarr_filepath)
         except FileNotFoundError:
             self.logger.debug("No zarr next to the csv. Asking for location.")
-            zarr_filepath = Path(open_dialog(self, dir=True))
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText(
+                f"The session folder '{zarr_filepath.name}' was not found "
+                f"next to '{csv_filepath.name}'.\n\n"
+                "In the next window, please select the exported session "
+                "folder. It was created by Export, next to the .csv file, "
+                "and its name ends in .zarr."
+            )
+            msg.exec_()
+            zarr_filepath = Path(
+                open_dialog(
+                    self,
+                    dir=True,
+                    title="Select the exported session folder (ends in .zarr)",
+                )
+            )
             if str(zarr_filepath) == ".":
                 self.logger.debug("No zarr file selected. Aborting.")
                 return
@@ -625,7 +661,8 @@ class CellAnalyzer(QWidget):
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
                 msg.setText(
-                    "The selected folder is not a valid exported .zarr session."
+                    "The selected folder is not an exported session. Please "
+                    "select the folder ending in .zarr that Export created."
                 )
                 msg.exec_()
                 return
@@ -643,6 +680,7 @@ class CellAnalyzer(QWidget):
         self.rejected_cells = rejected_cells
         self.mean_size, self.std_size = metrics  # , self.metric_value = ...
         self.undo_stack = undo_stack.tolist()
+        self.update_undo_button()
         self.included = set(pd.unique(self.accepted_cells.flatten())) - {0}
         self.excluded = set(pd.unique(self.rejected_cells.flatten())) - {0}
         self.btn_export.setEnabled(True)
@@ -717,7 +755,7 @@ class CellAnalyzer(QWidget):
             msg.exec_()
             return False
 
-        if self.check_for_overlap():
+        if self.check_for_overlap(self_drawn):
             return False
 
         endtime = time.time()
@@ -727,9 +765,18 @@ class CellAnalyzer(QWidget):
             self.logger.debug("Multiple ids in current cell layer")
             msg = QMessageBox()
             msg.setWindowTitle("napari")
-            msg.setText(
-                "More than one label detected in current cell layer. Please remove the added label."
-            )
+            if self_drawn:
+                msg.setText(
+                    "More than one label was drawn, but only one cell can be "
+                    "confirmed at a time.\n\n"
+                    "Please erase the extra labels (or use the same label for "
+                    "all parts of the cell) and press Confirm again. Draw "
+                    "further cells afterwards with another 'Draw own cell'."
+                )
+            else:
+                msg.setText(
+                    "More than one label detected in current cell layer. Please remove the added label."
+                )
             msg.exec_()
             return False
         endtime = time.time()
@@ -743,6 +790,7 @@ class CellAnalyzer(QWidget):
         self.logger.debug(f"Runtime include: {endtime - starttime}")
 
         self.undo_stack.append(id_)
+        self.update_undo_button()
 
         if len(self.remaining) > 0:
             starttime = time.time()
@@ -781,6 +829,7 @@ class CellAnalyzer(QWidget):
         self.excluded.add(current_id)
         self.remaining.remove(current_id)
         self.undo_stack.append(current_id)
+        self.update_undo_button()
 
         mask = np.where(self.current_cell_layer.data == current_id)
         self.rejected_cells[mask] = current_id
@@ -828,6 +877,7 @@ class CellAnalyzer(QWidget):
 
         self.calculate_metrics()
         self.update_labels()
+        self.update_undo_button()
         if last_evaluated < self.selfdrawn_lower_bound:
             self.display_next_cell(True)
         else:
@@ -879,7 +929,7 @@ class CellAnalyzer(QWidget):
             self.viewer.camera.zoom = 7.5
             self.btn_include.setEnabled(True)
             self.btn_exclude.setEnabled(True)
-            self.btn_undo.setEnabled(True)
+            self.update_undo_button()
 
     def show_excluded_on_click(self):
         if self.btn_show_excluded.text() == "Show Excluded":
@@ -917,7 +967,7 @@ class CellAnalyzer(QWidget):
             self.viewer.camera.zoom = 7.5
             self.btn_include.setEnabled(True)
             self.btn_exclude.setEnabled(True)
-            self.btn_undo.setEnabled(True)
+            self.update_undo_button()
 
     def show_remaining_on_click(self):
         if self.btn_show_remaining.text() == "Show Remaining":
@@ -958,7 +1008,7 @@ class CellAnalyzer(QWidget):
             self.viewer.camera.zoom = 7.5
             self.btn_include.setEnabled(True)
             self.btn_exclude.setEnabled(True)
-            self.btn_undo.setEnabled(True)
+            self.update_undo_button()
 
     def include_multiple_on_click(self):
         self.restore_missing_layers()
@@ -974,6 +1024,7 @@ class CellAnalyzer(QWidget):
             given_ids
         )
         self.lineedit_include.setText("")
+        self.update_undo_button()
         next_id = str(min(self.remaining)) if len(self.remaining) > 0 else ""
         self.lineedit_next_id.setText(next_id)
         self.display_next_cell(True)
@@ -1091,6 +1142,7 @@ class CellAnalyzer(QWidget):
                 msg.setWindowTitle("napari")
                 msg.setText("No cell annotated.")
                 msg.exec_()
+                self.current_cell_layer.mode = "paint"
                 return
             if self.include_on_click(True):
                 self.btn_segment.setText("Draw own cell")
@@ -1098,6 +1150,9 @@ class CellAnalyzer(QWidget):
                 self.btn_include.setEnabled(True)
                 self.btn_undo.setVisible(True)
                 self.btn_cancel.setVisible(False)
+            elif self.btn_segment.text() == "Confirm":
+                # confirming failed but the user is still drawing
+                self.current_cell_layer.mode = "paint"
 
     def display_next_cell(self, ignore_jump_back: bool = False):
         self.logger.debug("Displaying next cell...")
@@ -1289,12 +1344,18 @@ class CellAnalyzer(QWidget):
         overlap_layer.refresh()
         msg = QMessageBox()
         msg.setWindowTitle("napari")
-        msg.setText(
-            "Overlap detected and highlighted. Please remove the overlap!"
-        )
         if user_drawn:
+            msg.setText(
+                "Overlap detected and highlighted.\n\n"
+                "OK: continue drawing and remove the overlap.\n"
+                "Cancel: discard this drawing."
+            )
             msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
             msg.setDefaultButton(QMessageBox.Ok)
+        else:
+            msg.setText(
+                "Overlap detected and highlighted. Please remove the overlap!"
+            )
         return_value = msg.exec_()
         self.current_cell_layer.opacity = 0.7
         self.layer_to_evaluate.opacity = 0.3
@@ -1302,9 +1363,8 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Overlap display removed")
         self.viewer.layers.select_all()
         self.viewer.layers.selection.select_only(self.current_cell_layer)
-        if return_value == QMessageBox.Cancel and len(self.remaining) > 0:
-            self.btn_segment.setText("Draw own cell")
-            self.current_cell_layer.mode = "pan_zoom"
+        if user_drawn and return_value == QMessageBox.Cancel:
+            self.cancel_on_click()
 
     def calculate_metrics(self):
         self.logger.debug("Calculating metrics...")

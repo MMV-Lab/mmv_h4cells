@@ -7,7 +7,13 @@ import zarr
 _ZARR_NOT_FOUND = getattr(zarr.errors, "PathNotFoundError", FileNotFoundError)
 
 
-def open_dialog(parent, filetype="*.csv", directory="", dir: bool = False):
+def open_dialog(
+    parent,
+    filetype="*.csv",
+    directory="",
+    dir: bool = False,
+    title: str = None,
+):
     """
     Opens a dialog to select a file to open
 
@@ -19,6 +25,10 @@ def open_dialog(parent, filetype="*.csv", directory="", dir: bool = False):
         Only files of this file type will be displayed
     directory : str
         Opens view at the specified directory
+    dir : bool
+        Select a directory instead of a file
+    title : str, optional
+        Title of the dialog window
 
     Returns
     -------
@@ -28,12 +38,12 @@ def open_dialog(parent, filetype="*.csv", directory="", dir: bool = False):
     dialog = QFileDialog()
     if dir:
         filepath = dialog.getExistingDirectory(
-            parent, "Select Directory", directory=directory
+            parent, title or "Select Directory", directory=directory
         )
         return filepath
     else:
         filepath, _ = dialog.getOpenFileName(
-            parent, "Select CSV-File", directory, filetype, filetype
+            parent, title or "Select CSV-File", directory, filetype, filetype
         )
     return filepath
 

@@ -72,6 +72,31 @@ def hotkeys_new(widget, custom_keys: list):
     return True
 
 
+def _bound_callback(viewer, key):
+    for bind, callback in viewer.keymap.items():
+        if bind.to_text() == key:
+            return callback
+    return None
+
+
+def test_hotkeys_follow_the_newest_widget(make_napari_viewer):
+    """Reopening the panel creates a new widget; hotkeys must use it."""
+    viewer = make_napari_viewer()
+    first = CellAnalyzer(viewer)
+    second = CellAnalyzer(viewer)
+
+    assert _bound_callback(viewer, "K") == second.on_hotkey_include
+    assert _bound_callback(viewer, "G") == second.on_hotkey_exclude
+    assert _bound_callback(viewer, "H") == second.on_hotkey_undo
+    assert _bound_callback(viewer, "J") == second.toggle_visibility_label_layers_hotkey
+
+    # showing the older widget again hands the hotkeys back to it
+    from qtpy.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendEvent(first, QEvent(QEvent.Show))
+    assert _bound_callback(viewer, "K") == first.on_hotkey_include
+
+
 def test_hotkeys(create_widget):
     widget = create_widget
     custom_keys = ["K", "G", "H", "J"]
@@ -886,9 +911,10 @@ def test_handle_overlap(widget_for_overlap, user_drawn, choice):
         box.return_value.exec_.side_effect = dialog_shown
         widget.handle_overlap({(3, 0)}, user_drawn)
 
-    box.return_value.setText.assert_called_once_with(
-        "Overlap detected and highlighted. Please remove the overlap!"
-    )
+    box.return_value.setText.assert_called_once()
+    text = box.return_value.setText.call_args.args[0]
+    assert text.startswith("Overlap detected and highlighted.")
+    assert ("Cancel" in text) == user_drawn
     # while the dialog is shown the overlap is highlighted
     assert during["evaluate_opacity"] < 0.3
     assert during["current_opacity"] < 0.7
@@ -1028,10 +1054,18 @@ def test_import_asks_for_zarr_when_missing_next_to_csv(
     with patch(
         "mmv_h4cells._widget.open_dialog",
         side_effect=[csv_path, str(zarr_dir)],
-    ) as mock_open:
+    ) as mock_open, patch("mmv_h4cells._widget.QMessageBox") as mock_box:
         widget.import_on_click()
 
-    assert mock_open.call_args_list[1] == call(widget, dir=True)
+    # the user is told what is asked before the folder dialog opens
+    text = mock_box.return_value.setText.call_args.args[0]
+    assert "session.zarr" in text
+    assert "session.csv" in text
+    assert "ends in .zarr" in text
+    second_call = mock_open.call_args_list[1]
+    assert second_call.kwargs["dir"] is True
+    assert ".zarr" in second_call.kwargs["title"]
+    assert ".csv" in mock_open.call_args_list[0].kwargs["title"]
     _assert_imported(widget)
 
 
@@ -1041,7 +1075,7 @@ def test_import_missing_zarr_and_dialog_cancelled(create_widget, tmp_path):
 
     with patch(
         "mmv_h4cells._widget.open_dialog", side_effect=[csv_path, ""]
-    ):
+    ), patch("mmv_h4cells._widget.QMessageBox"):
         widget.import_on_click()
 
     assert widget.layer_to_evaluate is None
@@ -1060,7 +1094,10 @@ def test_import_invalid_folder_shows_message(create_widget, tmp_path):
     ), patch("mmv_h4cells._widget.QMessageBox") as mock_box:
         widget.import_on_click()
 
-    mock_box.return_value.setText.assert_called_once()
+    # first the explanation, then the "not a valid session" message
+    assert mock_box.return_value.setText.call_count == 2
+    last_text = mock_box.return_value.setText.call_args.args[0]
+    assert "not an exported session" in last_text
     assert widget.layer_to_evaluate is None
     assert len(widget.viewer.layers) == 0
 
@@ -1274,3 +1311,168 @@ def test_undo_after_export_removes_metrics_of_undone_cell(create_widget):
     assert [entry[0] for entry in widget.metric_data] == [3]
     assert widget.included == {3}
     assert widget.mean_size == 4  # only cell 3 (4 px) is left
+
+
+# --- draw own cell ---------------------------------------------------------
+
+
+@pytest.fixture
+def widget_drawing(widget_for_overlap):
+    """Widget in "draw own cell" mode (cell 2 is at rows 3-4, columns 0-1)."""
+    widget = widget_for_overlap
+    widget.draw_own_cell()
+    assert widget.btn_segment.text() == "Confirm"
+    assert widget.btn_cancel.isVisibleTo(widget) or not widget.btn_cancel.isHidden()
+    assert widget.current_cell_layer.mode == "paint"
+    return widget
+
+
+def _paint(widget, *pixels, label=None):
+    label = label or widget.current_cell_layer.selected_label
+    for row, col in pixels:
+        widget.current_cell_layer.data[row, col] = label
+
+
+def test_draw_own_cell_overlap_cancel_discards_the_drawing(widget_drawing):
+    widget = widget_drawing
+    _paint(widget, (3, 0), (10, 10))  # (3, 0) lies on cell 2
+
+    with patch("mmv_h4cells._widget.QMessageBox") as box:
+        box.return_value.exec_.return_value = box.Cancel
+        widget.draw_own_cell()  # confirm
+
+    box.return_value.setStandardButtons.assert_called_once()  # Ok and Cancel
+    assert widget.btn_segment.text() == "Draw own cell"
+    assert widget.btn_include.isEnabled()
+    assert widget.btn_exclude.isEnabled()
+    assert widget.btn_cancel.isHidden()
+    assert not widget.btn_undo.isHidden()
+    assert widget.current_cell_layer.mode == "pan_zoom"
+    assert widget.included == set()
+
+
+def test_draw_own_cell_overlap_ok_keeps_drawing(widget_drawing):
+    widget = widget_drawing
+    _paint(widget, (3, 0))
+
+    with patch("mmv_h4cells._widget.QMessageBox") as box:
+        box.return_value.exec_.return_value = box.Ok
+        widget.draw_own_cell()  # confirm
+
+    assert widget.btn_segment.text() == "Confirm"
+    assert not widget.btn_include.isEnabled()  # still in drawing mode
+    assert not widget.btn_cancel.isHidden()
+    assert widget.current_cell_layer.mode == "paint"  # can keep painting
+    assert widget.included == set()
+
+
+def test_draw_own_cell_with_several_labels_explains_and_keeps_drawing(
+    widget_drawing,
+):
+    widget = widget_drawing
+    label = widget.current_cell_layer.selected_label
+    _paint(widget, (10, 10), label=label)
+    _paint(widget, (12, 12), label=label + 1)
+
+    with patch("mmv_h4cells._widget.QMessageBox") as box:
+        widget.draw_own_cell()  # confirm
+
+    text = box.return_value.setText.call_args.args[0]
+    assert "only one cell can be confirmed at a time" in text
+    assert widget.btn_segment.text() == "Confirm"
+    assert widget.current_cell_layer.mode == "paint"
+    assert widget.included == set()
+
+
+def test_draw_own_cell_without_drawing_keeps_drawing(widget_drawing):
+    widget = widget_drawing
+
+    with patch("mmv_h4cells._widget.QMessageBox") as box:
+        widget.draw_own_cell()  # confirm without painting anything
+
+    box.return_value.setText.assert_called_once_with("No cell annotated.")
+    assert widget.btn_segment.text() == "Confirm"
+    assert widget.current_cell_layer.mode == "paint"
+
+
+def test_draw_own_cell_confirm_includes_the_cell(widget_drawing):
+    widget = widget_drawing
+    label = widget.current_cell_layer.selected_label
+    _paint(widget, (10, 10), (10, 11))
+
+    widget.draw_own_cell()  # confirm
+
+    assert label in widget.included
+    assert widget.btn_segment.text() == "Draw own cell"
+    assert widget.btn_include.isEnabled()
+
+# --- undo button -----------------------------------------------------------
+
+
+def test_undo_button_follows_the_undo_stack(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    assert not widget.btn_undo.isEnabled()
+
+    widget.start_analysis_on_click()
+    assert not widget.btn_undo.isEnabled()  # nothing to undo yet
+
+    widget.include_on_click()
+    assert widget.btn_undo.isEnabled()
+    widget.exclude_on_click()
+    assert widget.btn_undo.isEnabled()
+
+    widget.undo_on_click()  # one decision left
+    assert widget.btn_undo.isEnabled()
+    widget.undo_on_click()  # stack is empty again
+    assert not widget.btn_undo.isEnabled()
+
+
+def test_undo_button_enabled_after_include_multiple(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+    widget.lineedit_include.setText("2")
+
+    with patch("mmv_h4cells._widget.QMessageBox"):
+        widget.include_multiple_on_click()
+
+    assert widget.btn_undo.isEnabled()
+
+
+def test_undo_button_while_showing_cells(widget_with_decisions):
+    widget = widget_with_decisions
+    assert widget.btn_undo.isEnabled()
+
+    _show_click(widget, "included")
+    assert not widget.btn_undo.isEnabled()
+    _show_click(widget, "included")  # back
+    assert widget.btn_undo.isEnabled()
+
+
+def test_undo_button_stays_disabled_after_showing_with_empty_stack(
+    create_widget,
+):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+
+    _show_click(widget, "remaining")
+    _show_click(widget, "remaining")  # back
+
+    assert not widget.btn_undo.isEnabled()
+
+
+def test_undo_button_after_import(create_widget, tmp_path):
+    widget = create_widget
+    _write_session(tmp_path / "session.zarr")  # undo stack [1, 2]
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        return_value=str(tmp_path / "session.csv"),
+    ):
+        widget.import_on_click()
+    assert not widget.btn_undo.isEnabled()  # analysis not started yet
+
+    widget.start_analysis_on_click()
+    assert widget.btn_undo.isEnabled()
