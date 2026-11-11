@@ -1744,3 +1744,241 @@ def test_cells_of_3d_images_can_be_evaluated(create_widget):
     assert not widget.accepted_cells.any()
     assert not widget.rejected_cells.any()
     assert np.array_equal(widget.layer_to_evaluate.data, original)
+
+
+# --- compact label dtype -----------------------------------------------------
+
+
+def _label_arrays(widget):
+    return {
+        "layer": widget.layer_to_evaluate.data,
+        "accepted": widget.accepted_cells,
+        "rejected": widget.rejected_cells,
+        "current": widget.current_cell_layer.data,
+    }
+
+
+def test_labels_are_stored_as_uint16_when_the_analysis_starts(create_widget):
+    widget = create_widget
+    data = _labels(1, 2, 3)  # int32
+    layer = widget.viewer.add_labels(data, name="labels")
+    assert layer.data.dtype == np.int32  # adding the layer changes nothing
+    opacity_before = layer.opacity
+
+    widget.start_analysis_on_click()
+
+    assert widget.layer_to_evaluate is layer
+    assert layer.name == "labels"
+    for name, array in _label_arrays(widget).items():
+        assert array.dtype == np.uint16, name
+    assert np.array_equal(layer.data, data)  # the values are unchanged
+    assert set(np.unique(layer.data)) == {0, 1, 2, 3}
+    assert layer.opacity != opacity_before  # the plugin dims the layer
+
+
+def test_the_original_array_is_not_modified(create_widget):
+    widget = create_widget
+    data = _labels(1, 2, 3)
+    original = data.copy()
+    widget.viewer.add_labels(data, name="labels")
+    widget.start_analysis_on_click()
+
+    widget.include_on_click()
+    widget.exclude_on_click()  # erases a cell from the layer
+
+    assert not np.array_equal(widget.layer_to_evaluate.data, original)
+    assert np.array_equal(data, original)
+
+
+def test_labels_stay_wide_if_the_ids_do_not_fit(create_widget):
+    widget = create_widget
+    data = _labels(1, 65400)  # no room left for self drawn cells
+    widget.viewer.add_labels(data, name="labels")
+
+    widget.start_analysis_on_click()
+
+    for name, array in _label_arrays(widget).items():
+        assert array.dtype == np.int32, name
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.int16])
+def test_small_label_types_are_left_alone(create_widget, dtype):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2).astype(dtype), name="labels")
+
+    widget.start_analysis_on_click()
+
+    for name, array in _label_arrays(widget).items():
+        assert array.dtype == dtype, name
+
+
+def test_imported_session_arrays_are_compact_after_the_start(
+    create_widget, tmp_path
+):
+    widget = create_widget
+    _write_session(tmp_path / "session.zarr")  # stored as 32 bit
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        return_value=str(tmp_path / "session.csv"),
+    ):
+        widget.import_on_click()
+    widget.start_analysis_on_click()
+
+    for name, array in _label_arrays(widget).items():
+        assert array.dtype == np.uint16, name
+    assert set(np.unique(widget.accepted_cells)) == {0, 1}
+    assert set(np.unique(widget.rejected_cells)) == {0, 2}
+
+
+def test_export_stores_32_bit_labels(create_widget, tmp_path):
+    import zarr
+    from bioio import BioImage
+
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()
+    widget.include_on_click()
+    widget.exclude_on_click()
+    csv = tmp_path / "out.csv"
+
+    with patch("mmv_h4cells._widget.save_dialog", return_value=str(csv)):
+        widget.export_on_click()
+
+    store = zarr.open(str(csv.with_suffix(".zarr")), mode="r")
+    for name in ("data_to_evaluate", "accepted_cells", "rejected_cells"):
+        assert store[name].dtype == np.int32, name
+    assert np.array_equal(store["accepted_cells"][:], widget.accepted_cells)
+    assert np.array_equal(store["rejected_cells"][:], widget.rejected_cells)
+    tiff = BioImage(csv.with_suffix(".tiff")).get_image_data("YX")
+    assert np.array_equal(tiff, widget.accepted_cells)
+
+
+def _uint16_layer_with_highest_id():
+    data = np.zeros((20, 20), dtype=np.uint16)
+    data[0:2, 0:2] = 1
+    data[3:5, 0:2] = 65535
+    return data
+
+
+def test_the_highest_uint16_id_does_not_wrap_around(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_uint16_layer_with_highest_id(), name="labels")
+
+    assert widget.selfdrawn_lower_bound == 65536
+
+
+def test_drawing_a_cell_widens_the_labels_when_ids_run_out(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_uint16_layer_with_highest_id(), name="labels")
+    widget.start_analysis_on_click()
+
+    widget.draw_own_cell()  # needs the label 65536
+
+    assert widget.current_cell_layer.selected_label == 65536
+    for name, array in _label_arrays(widget).items():
+        assert array.dtype == np.int32, name
+    widget.current_cell_layer.data[10:12, 10:12] = 65536
+    widget.draw_own_cell()  # confirm
+    assert 65536 in widget.included
+    assert widget.layer_to_evaluate.data[10, 10] == 65536
+    assert widget.accepted_cells[10, 10] == 65536
+
+    widget.undo_on_click()
+    assert 65536 not in widget.included
+    assert widget.layer_to_evaluate.data[10, 10] == 0
+    assert widget.accepted_cells[10, 10] == 0
+
+
+def test_overlap_highlight_does_not_overflow_the_label_type(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_uint16_layer_with_highest_id(), name="labels")
+    widget.start_analysis_on_click()
+    widget.current_cell_layer.data[3, 0] = 65535  # highest possible label
+
+    with patch("mmv_h4cells._widget.QMessageBox"):
+        widget.handle_overlap({(3, 0)})  # must not raise
+
+    assert [layer.name for layer in widget.viewer.layers].count("Overlap") == 0
+
+
+# --- current cell without scanning the whole layer --------------------------
+
+
+def _scan_current_cell(widget):
+    """The labels and box of the current cell layer, found by scanning it."""
+    data = widget.current_cell_layer.data
+    coords = np.nonzero(data)
+    if len(coords[0]) == 0:
+        return set(), None
+    labels = {int(v) for v in np.unique(data[coords])}
+    box = tuple(slice(int(c.min()), int(c.max()) + 1) for c in coords)
+    return labels, box
+
+
+def test_current_cell_of_an_untouched_layer_is_not_scanned(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()  # cell 1 is displayed
+
+    with patch("numpy.nonzero", side_effect=AssertionError("scanned")):
+        labels, box = widget.get_current_cell()
+
+    assert labels == {1}
+    assert box == (slice(0, 2), slice(0, 2))
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param(lambda d: d.__setitem__((15, 15), 1), id="add_pixel"),
+        pytest.param(lambda d: d.__setitem__((0, 0), 0), id="erase_pixel"),
+        pytest.param(lambda d: d.__setitem__((15, 15), 2), id="other_label"),
+        pytest.param(lambda d: d.__setitem__(slice(None), 0), id="erase_all"),
+        pytest.param(
+            lambda d: (d.__setitem__((0, 0), 0), d.__setitem__((15, 15), 1)),
+            id="move_pixel_same_count",
+        ),
+        pytest.param(
+            lambda d: (d.__setitem__((0, 0), 0), d.__setitem__((1, 1), 2)),
+            id="relabel_pixel_same_count",
+        ),
+    ],
+)
+def test_current_cell_notices_manual_edits(create_widget, edit):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    widget.start_analysis_on_click()  # cell 1 is displayed
+    edit(widget.current_cell_layer.data)
+
+    assert widget.get_current_cell() == _scan_current_cell(widget)
+
+
+def test_back_centers_the_camera_on_the_displayed_cell(widget_with_decisions):
+    widget = widget_with_decisions  # cell 3 (rows 6-7, columns 0-1) is shown
+    _show_click(widget, "included")
+    widget.viewer.camera.center = (0, 100, 100)
+    widget.viewer.camera.zoom = 1
+
+    _show_click(widget, "included")  # back
+
+    assert tuple(widget.viewer.camera.center)[-2:] == pytest.approx((6.5, 0.5))
+    assert widget.viewer.camera.zoom == 7.5
+
+
+def test_show_remaining_matches_the_full_image_computation(create_widget):
+    widget = create_widget
+    data = _random_cells(seed=2)
+    widget.viewer.add_labels(data, name="labels")
+    widget.start_analysis_on_click()
+    for _ in range(3):
+        widget.include_on_click()
+    for _ in range(2):
+        widget.exclude_on_click()
+
+    widget.show_remaining_on_click()
+
+    working = widget.layer_to_evaluate.data
+    expected = np.where(np.isin(working, list(widget.remaining)), working, 0)
+    assert np.array_equal(widget.remaining_layer.data, expected)
+    assert set(np.unique(expected)) - {0} == {int(i) for i in widget.remaining}

@@ -1,4 +1,3 @@
-import copy
 import logging
 from qtpy.QtWidgets import (
     QLabel,
@@ -34,6 +33,10 @@ import time
 # Label images with larger ids than this are not indexed by bounding box
 # (the lookup then searches the arrays for each cell)
 MAX_CACHED_LABEL = 10_000_000
+
+# Number of self drawn cells that still have to fit when the labels are stored
+# with a smaller integer type (see CellAnalyzer.use_compact_label_dtype)
+LABEL_HEADROOM = 256
 
 
 class CellAnalyzer(QWidget):
@@ -90,6 +93,8 @@ class CellAnalyzer(QWidget):
         # bounding box of every cell (computed lazily, see get_boxes)
         self._boxes = None
         self._watched_layer = None
+        # (id, box, mask) of the cell shown in the current cell layer
+        self._displayed = None
 
         self.next_id: int = None  # computed id of the next cell to evaluate
 
@@ -589,11 +594,89 @@ class CellAnalyzer(QWidget):
             None as box if the layer is empty.
         """
         data = self.current_cell_layer.data
+        if self._displayed is not None:
+            # Scanning the whole layer is slow for large images. If it still
+            # holds exactly what display_cell put there (same number of
+            # pixels, and the same content inside the box), nothing else can
+            # be in it.
+            cell_id, box, mask = self._displayed
+            if np.count_nonzero(data) == np.count_nonzero(
+                mask
+            ) and np.array_equal(data[box], np.where(mask, cell_id, 0)):
+                return {cell_id}, box
         coords = np.nonzero(data)
         if len(coords[0]) == 0:
             return set(), None
         labels = {int(v) for v in np.unique(data[coords])}
         return labels, self.box_from_coords(coords)
+
+    @staticmethod
+    def centroid_in_box(mask, box) -> tuple:
+        """Centroid of a mask that covers the given box, in image coordinates."""
+        return tuple(
+            float(c) + s.start
+            for c, s in zip(ndimage.center_of_mass(mask), box)
+        )
+
+    def center_on_current_cell(self):
+        """Move the camera to the displayed cell and zoom in."""
+        label = self.current_cell_layer.selected_label
+        labels, box = self.get_current_cell()
+        if box is not None and label in labels:
+            mask = self.current_cell_layer.data[box] == label
+            self.viewer.camera.center = self.centroid_in_box(mask, box)
+        self.viewer.camera.zoom = 7.5
+
+    # --- label dtype --------------------------------------------------------
+    # napari needs to convert labels wider than 16 bit before it can show them
+    # (about 200 ms for a 6000 x 6000 image, for every refresh). 16 bit labels
+    # are shown directly, and all label arrays need half the memory.
+
+    def convert_label_arrays(self, dtype):
+        """Store all label arrays with another integer type."""
+        self.layer_to_evaluate.data = self.layer_to_evaluate.data.astype(dtype)
+        for name in ("accepted_cells", "rejected_cells"):
+            array = getattr(self, name)
+            if array is not None:
+                setattr(self, name, array.astype(dtype))
+        if self.current_cell_layer is not None:
+            self.current_cell_layer.data = self.current_cell_layer.data.astype(
+                dtype
+            )
+
+    def use_compact_label_dtype(self):
+        """Store the labels as uint16 if all ids fit (with some headroom)."""
+        data = self.layer_to_evaluate.data
+        if data.dtype.itemsize <= 2 or not np.issubdtype(
+            data.dtype, np.integer
+        ):
+            return
+        arrays = [
+            array
+            for array in (
+                data,
+                self.accepted_cells,
+                self.rejected_cells,
+            )
+            if array is not None and array.size
+        ]
+        highest = max(int(array.max()) for array in arrays)
+        lowest = min(int(array.min()) for array in arrays)
+        if lowest < 0 or highest + LABEL_HEADROOM > np.iinfo(np.uint16).max:
+            return
+        self.logger.debug(f"Storing labels as uint16 (was {data.dtype})")
+        self.convert_label_arrays(np.uint16)
+
+    def ensure_label_capacity(self, label: int):
+        """Make sure the label arrays can store the given label."""
+        dtype = self.layer_to_evaluate.data.dtype
+        if label <= np.iinfo(dtype).max:
+            return
+        for wider in (np.int32, np.int64):
+            if label <= np.iinfo(wider).max:
+                self.logger.debug(f"Storing labels as {wider.__name__}")
+                self.convert_label_arrays(wider)
+                return
 
     def has_session_state(self) -> bool:
         """Whether cells were already evaluated (e.g. an imported session)."""
@@ -614,7 +697,7 @@ class CellAnalyzer(QWidget):
         ):
             # ids of self drawn cells must not collide with the ids of the
             # layer, so the bound belongs to the layer it was computed from
-            self.selfdrawn_lower_bound = max(unique_ids) + 1
+            self.selfdrawn_lower_bound = int(max(unique_ids)) + 1
 
         if not self.has_session_state():
             self.accepted_cells = np.zeros_like(self.layer_to_evaluate.data)
@@ -698,10 +781,12 @@ class CellAnalyzer(QWidget):
         self.btn_include_multiple.setEnabled(True)
         self.label_next_id.setText("Next cell:")
         self.layer_to_evaluate.opacity = 0.3
+        self.use_compact_label_dtype()
 
         self.current_cell_layer = self.viewer.add_labels(
             np.zeros_like(self.layer_to_evaluate.data), name="Current Cell"
         )
+        self._displayed = None
         self.update_undo_button()
         if not start_id in self.remaining:
             self.logger.warning("Start id not in remaining ids")
@@ -732,14 +817,13 @@ class CellAnalyzer(QWidget):
         self.logger.debug(f"Displaying cell {cell_id}")
         self.current_cell_layer.data[:] = 0
         centroid = None
+        self._displayed = None
         box = self.cell_box(cell_id)
         if box is not None:
             mask = self.layer_to_evaluate.data[box] == cell_id
             self.current_cell_layer.data[box][mask] = cell_id
-            centroid = tuple(
-                float(c) + s.start
-                for c, s in zip(ndimage.center_of_mass(mask), box)
-            )
+            centroid = self.centroid_in_box(mask, box)
+            self._displayed = (cell_id, box, mask)
         self.current_cell_layer.opacity = 0.7
         self.current_cell_layer.refresh()
         if centroid is not None:
@@ -805,7 +889,7 @@ class CellAnalyzer(QWidget):
             undo_stack,
             self.selfdrawn_lower_bound,
         ) = session
-        self.logger.debug(f"Minimum id: {min(pd.unique(data_to_evaluate.flatten()))}, Maximum id: {max(pd.unique(data_to_evaluate.flatten()))}")
+        self.logger.debug(f"Imported labels of shape {data_to_evaluate.shape}")
         self.accepted_cells = accepted_cells
         self.rejected_cells = rejected_cells
         self.mean_size, self.std_size = metrics  # , self.metric_value = ...
@@ -1073,13 +1157,7 @@ class CellAnalyzer(QWidget):
             self.set_visitibility_label_layers(True)
             self.btn_show_included.setText("Show Included")
             self.viewer.layers.selection.active = self.current_cell_layer
-            centroid = ndimage.center_of_mass(
-                self.current_cell_layer.data,
-                labels=self.current_cell_layer.data,
-                index=self.current_cell_layer.selected_label,
-            )
-            self.viewer.camera.center = centroid
-            self.viewer.camera.zoom = 7.5
+            self.center_on_current_cell()
             self.btn_include.setEnabled(True)
             self.btn_exclude.setEnabled(True)
             self.update_undo_button()
@@ -1111,13 +1189,7 @@ class CellAnalyzer(QWidget):
             self.set_visitibility_label_layers(True)
             self.btn_show_excluded.setText("Show Excluded")
             self.viewer.layers.selection.active = self.current_cell_layer
-            centroid = ndimage.center_of_mass(
-                self.current_cell_layer.data,
-                labels=self.current_cell_layer.data,
-                index=self.current_cell_layer.selected_label,
-            )
-            self.viewer.camera.center = centroid
-            self.viewer.camera.zoom = 7.5
+            self.center_on_current_cell()
             self.btn_include.setEnabled(True)
             self.btn_exclude.setEnabled(True)
             self.update_undo_button()
@@ -1138,9 +1210,12 @@ class CellAnalyzer(QWidget):
                 self.viewer.layers.remove(self.excluded_layer)
                 self.excluded_layer = None
                 self.btn_show_excluded.setText("Show Excluded")
-            data = copy.deepcopy(self.layer_to_evaluate.data)
-            mask = np.isin(data, list(self.remaining | {0}), invert=True)
-            data[mask] = 0
+            data = np.zeros_like(self.layer_to_evaluate.data)
+            for cell_id in self.remaining:
+                box = self.cell_box(cell_id)
+                if box is not None:
+                    cell = self.layer_to_evaluate.data[box] == cell_id
+                    data[box][cell] = cell_id
             self.remaining_layer = self.viewer.add_labels(
                 data, name="Remaining Cells"
             )
@@ -1152,13 +1227,7 @@ class CellAnalyzer(QWidget):
             self.set_visitibility_label_layers(True)
             self.btn_show_remaining.setText("Show Remaining")
             self.viewer.layers.selection.active = self.current_cell_layer
-            centroid = ndimage.center_of_mass(
-                self.current_cell_layer.data,
-                labels=self.current_cell_layer.data,
-                index=self.current_cell_layer.selected_label,
-            )
-            self.viewer.camera.center = centroid
-            self.viewer.camera.zoom = 7.5
+            self.center_on_current_cell()
             self.btn_include.setEnabled(True)
             self.btn_exclude.setEnabled(True)
             self.update_undo_button()
@@ -1277,20 +1346,20 @@ class CellAnalyzer(QWidget):
             self.lineedit_next_id.setText(current_id)
             # Display empty current cell layer
             self.current_cell_layer.data[:] = 0
+            self._displayed = None
             self.current_cell_layer.refresh()
             # Select current cell layer, set mode to paint
             self.viewer.layers.select_all()
             self.viewer.layers.selection.select_only(self.current_cell_layer)
             self.current_cell_layer.mode = "paint"
             # Select unique id
-            self.current_cell_layer.selected_label = (
-                max(
-                    np.max(self.accepted_cells),
-                    np.max(self.rejected_cells),
-                    np.max(self.layer_to_evaluate.data),
-                )
-                + 1
+            new_label = 1 + max(
+                int(np.max(self.accepted_cells)),
+                int(np.max(self.rejected_cells)),
+                int(np.max(self.layer_to_evaluate.data)),
             )
+            self.ensure_label_capacity(new_label)
+            self.current_cell_layer.selected_label = new_label
         else:
             self.logger.debug("Draw own cell confirmed")
             self.current_cell_layer.mode = "pan_zoom"
@@ -1520,8 +1589,9 @@ class CellAnalyzer(QWidget):
             name="Overlap",
             opacity=1,
         )
-        overlap_layer.data[overlap_indices] = (
-            np.amax(self.current_cell_layer.data) + 1
+        highlight = int(np.amax(self.current_cell_layer.data)) + 1
+        overlap_layer.data[overlap_indices] = min(
+            highlight, np.iinfo(overlap_layer.data.dtype).max
         )
         overlap_layer.refresh()
         msg = QMessageBox()

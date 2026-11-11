@@ -58,7 +58,10 @@ def free_spots(img, h=6, w=8, count=3):
 
 
 def h(a):
-    return hashlib.md5(np.ascontiguousarray(a).tobytes()).hexdigest()[:12]
+    # the stored dtype may change, the values must not
+    return hashlib.md5(
+        np.ascontiguousarray(a, dtype=np.int32).tobytes()
+    ).hexdigest()[:12]
 
 
 def snap(widget):
@@ -98,6 +101,9 @@ def test_long_session_matches_the_recorded_one(make_napari_viewer, monkeypatch, 
 
     monkeypatch.setattr(QMessageBox, "exec_", lambda *a: 0)
     img, ids = make_image()
+    # the plugin may change the array it is given: pick the spots to draw on
+    # from the pristine image, before anything happens
+    (y0, x0), (y1, x1), (y2, x2) = free_spots(img.copy())
     viewer = make_napari_viewer()
     widget = CellAnalyzer(viewer)
     viewer.add_labels(img, name="seg")
@@ -125,7 +131,6 @@ def test_long_session_matches_the_recorded_one(make_napari_viewer, monkeypatch, 
     step("include after multiple", widget)
 
     # draw an own cell in the background
-    (y0, x0), (y1, x1), (y2, x2) = free_spots(img)
     widget.draw_own_cell()
     label = widget.current_cell_layer.selected_label
     widget.current_cell_layer.data[y0 : y0 + 6, x0 : x0 + 8] = label
