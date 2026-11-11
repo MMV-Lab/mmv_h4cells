@@ -94,6 +94,17 @@ logging.getLogger("mmv_h4cells").setLevel(logging.DEBUG)
 Contributions are very welcome. Tests can be run with [tox], please ensure
 the coverage at least stays the same before you submit a pull request.
 
+### Code structure
+
+- `_session.py`: the cells and the decisions about them (include, exclude, undo,
+  overlap, metrics). It knows nothing about Qt or napari and is tested without
+  a viewer (`_tests/test_session.py`).
+- `_widget.py`: the napari widget. It shows what the session does and takes care
+  of the buttons, messages and layers.
+- `_navigation.py`: which cell is shown next.
+- `_reader.py`, `_writer.py`, `_roi.py`: reading and writing sessions, and the
+  export of a region.
+
 ## License
 
 Distributed under the terms of the [BSD-3] license,

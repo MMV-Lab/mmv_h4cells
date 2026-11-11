@@ -10,6 +10,7 @@ from bioio import BioImage
 from qtpy.QtWidgets import QMessageBox
 
 from mmv_h4cells import CellAnalyzer
+from mmv_h4cells._session import Result, Session, Status
 
 PATH = Path(__file__).parent / "data"
 
@@ -249,78 +250,106 @@ def test_export_no_file(
     mock_write.assert_not_called()
 
 
-@patch.object(CellAnalyzer, "check_for_overlap", return_value=False)
-@patch.object(CellAnalyzer, "include")
 @patch.object(CellAnalyzer, "display_next_cell")
-@patch.object(QMessageBox, "exec_")
+@patch.object(CellAnalyzer, "handle_overlap")
+@patch.object(CellAnalyzer, "update_labels")
+@patch.object(CellAnalyzer, "show_message")
 @pytest.mark.parametrize("user_drawn", [True, False])
-@pytest.mark.parametrize("remaining", [set(), {1}, {1, 2}])
-def test_include_on_click(
-    mock_msg,
+@pytest.mark.parametrize(
+    "result, message",
+    [
+        (Result(Status.NO_REMAINING), "No remaining cells"),
+        (Result(Status.EMPTY), "No cell found in the current cell layer."),
+        (Result(Status.MULTIPLE_LABELS), "More than one label"),
+    ],
+    ids=["no_remaining", "empty", "multiple_labels"],
+)
+def test_include_on_click_says_why_nothing_was_included(
+    mock_message,
+    mock_update,
+    mock_handle,
     mock_display,
-    mock_include,
-    mock_check,
     create_started_widget,
+    result,
+    message,
     user_drawn,
-    remaining,
 ):
     widget = create_started_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    widget.remaining = remaining.copy()
-    undo_amount = len(widget.undo_stack)
-    widget.include_on_click(user_drawn)
-    if remaining == set():
-        mock_display.assert_not_called()
-        mock_include.assert_not_called()
-        mock_check.assert_not_called()
-        mock_msg.assert_called_once()
-        return
-    mock_check.assert_called_once()
-    mock_include.assert_called_once()
-    cell_id, region, remove_from_remaining = mock_include.call_args.args
-    box = mock_include.call_args.kwargs["box"]
-    current = widget.current_cell_layer.data
-    assert cell_id == 1
-    assert remove_from_remaining == (not user_drawn)
-    # the cell is passed as the region inside its bounding box
-    assert np.array_equal(region, current[box])
-    assert np.count_nonzero(current[box]) == np.count_nonzero(current)
 
-    if remaining == {1, 2}:
-        mock_display.assert_called_once()
+    with patch.object(Session, "include_current", return_value=result):
+        assert widget.include_on_click(user_drawn) is False
 
-    assert len(widget.undo_stack) == undo_amount + 1
-    assert widget.undo_stack[-1] == 1
+    mock_message.assert_called_once()
+    assert message in mock_message.call_args.args[0]
+    mock_handle.assert_not_called()
+    mock_display.assert_not_called()
+    mock_update.assert_not_called()
 
 
-@patch.object(CellAnalyzer, "check_for_overlap", return_value=True)
-@patch.object(CellAnalyzer, "include")
 @patch.object(CellAnalyzer, "display_next_cell")
-@patch.object(QMessageBox, "exec_")
-@pytest.mark.parametrize("remaining", [set(), {1}])
-def test_include_on_click_overlap(
-    mock_msg,
+@patch.object(CellAnalyzer, "handle_overlap")
+@patch.object(CellAnalyzer, "show_message")
+@pytest.mark.parametrize("user_drawn", [True, False])
+def test_include_on_click_handles_an_overlap(
+    mock_message, mock_handle, mock_display, create_started_widget, user_drawn
+):
+    widget = create_started_widget
+    overlap = {(0, 0)}
+    result = Result(Status.OVERLAP, overlap=overlap)
+
+    with patch.object(Session, "include_current", return_value=result):
+        assert widget.include_on_click(user_drawn) is False
+
+    mock_handle.assert_called_once_with(overlap, user_drawn)
+    mock_message.assert_not_called()
+    mock_display.assert_not_called()
+
+
+@patch.object(CellAnalyzer, "display_next_cell")
+@patch.object(CellAnalyzer, "update_labels")
+@pytest.mark.parametrize(
+    "remaining, shows_the_next_cell", [(set(), False), ({2}, True)]
+)
+def test_include_on_click_shows_the_next_cell(
+    mock_update,
     mock_display,
-    mock_include,
-    mock_check,
     create_started_widget,
     remaining,
+    shows_the_next_cell,
 ):
     widget = create_started_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
     widget.remaining = remaining.copy()
-    widget.include_on_click(False)
+    result = Result(Status.INCLUDED, cell_id=1)
 
-    if remaining == set():
-        mock_display.assert_not_called()
-        mock_include.assert_not_called()
-        mock_check.assert_not_called()
-        mock_msg.assert_called_once()
-    else:
-        mock_check.assert_called_once()
-        mock_include.assert_not_called()
-        mock_display.assert_not_called()
-        mock_msg.assert_not_called()
+    with patch.object(Session, "include_current", return_value=result):
+        assert widget.include_on_click() is True
+
+    mock_update.assert_called_once()
+    assert mock_display.called == shows_the_next_cell
+
+
+@patch.object(CellAnalyzer, "display_next_cell")
+@patch.object(CellAnalyzer, "show_message")
+@pytest.mark.parametrize(
+    "result, message",
+    [
+        (Result(Status.NO_REMAINING), "No remaining cells"),
+        (Result(Status.EMPTY), "No cell found in the current cell layer."),
+        (Result(Status.MULTIPLE_LABELS), "More than one label"),
+    ],
+    ids=["no_remaining", "empty", "multiple_labels"],
+)
+def test_exclude_on_click_says_why_nothing_was_excluded(
+    mock_message, mock_display, create_started_widget, result, message
+):
+    widget = create_started_widget
+
+    with patch.object(Session, "exclude_current", return_value=result):
+        widget.exclude_on_click()
+
+    mock_message.assert_called_once()
+    assert message in mock_message.call_args.args[0]
+    mock_display.assert_not_called()
 
 
 @patch.object(CellAnalyzer, "update_labels")
@@ -348,7 +377,7 @@ def test_exclude_on_click(
         mock_display.assert_called_once()
 
 
-@patch.object(CellAnalyzer, "calculate_metrics")
+@patch.object(Session, "calculate_metrics")
 @patch.object(CellAnalyzer, "update_labels")
 @patch.object(CellAnalyzer, "display_next_cell")
 @patch.object(CellAnalyzer, "redisplay_current_cell")
@@ -455,7 +484,7 @@ def test_double_undo_next_ids(create_started_widget):
     assert widget.lineedit_next_id.text() == "2"
 
 
-@patch.object(CellAnalyzer, "calculate_metrics")
+@patch.object(Session, "calculate_metrics")
 @patch.object(CellAnalyzer, "update_labels")
 @patch.object(CellAnalyzer, "display_next_cell")
 def test_undo_on_click_no_undo_stack(
@@ -565,7 +594,7 @@ def test_showing_one_kind_replaces_the_other(widget_with_decisions):
 @patch.object(QMessageBox, "exec_")
 @patch.object(QMessageBox, "setText")
 @patch.object(CellAnalyzer, "display_next_cell")
-@patch.object(CellAnalyzer, "include_multiple")
+@patch.object(Session, "include_multiple")
 @pytest.mark.parametrize(
     "ids",
     [
@@ -662,12 +691,12 @@ def test_get_ids_to_include_invalid_input(mock_exec, create_widget):
     mock_exec.assert_called_once()
 
 
-@patch.object(CellAnalyzer, "include")
+@patch.object(Session, "include")
 @pytest.mark.parametrize("ids", [[], [1], [1, 2], [1, 2, 3], [1, 2, 3, 4]])
 def test_include_multiple(mock_include, create_widget_in_analysis, ids):
     widget = create_widget_in_analysis
     widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    included, ignored, overlapped, faulty = widget.include_multiple(ids)
+    included, ignored, overlapped, faulty = widget.session.include_multiple(ids)
     print(included, ignored, overlapped, faulty)
     assert overlapped == set()
     if 1 in ids:
@@ -687,13 +716,13 @@ def test_include_multiple_overlap(create_widget_in_analysis):
     widget.layer_to_evaluate.data[1, 1] = 3
     widget.layer_to_evaluate.data[2, 2] = 4
     widget.layer_to_evaluate.data[3, 3] = 4
-    widget.invalidate_boxes()  # the array was changed in place
+    widget.session.invalidate_boxes()  # the array was changed in place
     widget.accepted_cells[:] = 0
     widget.accepted_cells[0, 0] = 5
     widget.accepted_cells[1, 1] = 5
     widget.accepted_cells[2, 2] = 5
     widget.accepted_cells[3, 3] = 5
-    included, ignored, overlapped, faulty = widget.include_multiple([3, 4])
+    included, ignored, overlapped, faulty = widget.session.include_multiple([3, 4])
     print(included, ignored, overlapped, faulty)
     assert included == set()
     assert ignored == set()
@@ -821,7 +850,7 @@ class TestDisplayNextCell:
             mock_set_text.assert_not_called()
 
 
-@patch.object(CellAnalyzer, "add_cell_to_accepted")
+@patch.object(Session, "add_cell_to_accepted")
 @pytest.mark.parametrize("remove", [True, False])
 def test_include(mock_add, create_started_widget, remove):
     widget = create_started_widget
@@ -831,7 +860,7 @@ def test_include(mock_add, create_started_widget, remove):
     data_array = np.zeros_like(widget.layer_to_evaluate.data)
     data_array[indices] = id_
     accepted_cells_sum = np.sum(widget.accepted_cells)
-    widget.include(id_, data_array, remove)
+    widget.session.include(id_, data_array, remove)
     assert np.sum(widget.accepted_cells) > accepted_cells_sum
     if remove:
         assert 1 not in widget.remaining
@@ -841,26 +870,6 @@ def test_include(mock_add, create_started_widget, remove):
     # So we just test if the function was called
     mock_add.assert_called_once()
 
-
-@patch.object(CellAnalyzer, "handle_overlap")
-@pytest.mark.parametrize("overlap", [{}, {(0, 0)}])
-@pytest.mark.parametrize("user_drawn", [True, False])
-def test_check_for_overlap(
-    mock_handle_overlap, create_started_widget, overlap, user_drawn
-):
-    widget = create_started_widget
-    widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
-    with patch.object(
-        widget, "get_overlap", return_value=overlap
-    ) as mock_get_overlap:
-        retval = widget.check_for_overlap(user_drawn)
-        mock_get_overlap.assert_called_once()
-
-    if overlap:
-        mock_handle_overlap.assert_called_once_with(overlap, user_drawn)
-        assert retval
-    else:
-        assert not retval
 
 @pytest.fixture
 def widget_for_overlap(create_widget):
@@ -886,7 +895,7 @@ def test_get_overlap(widget_for_overlap, painted, expected):
     for row, col in painted:
         widget.current_cell_layer.data[row, col] = 1
 
-    assert widget.get_overlap() == expected
+    assert widget.session.get_overlap() == expected
 
 
 @pytest.mark.parametrize(
@@ -947,21 +956,19 @@ def test_handle_overlap(widget_for_overlap, user_drawn, choice):
         assert widget.current_cell_layer.mode == "paint"
 
 
-@patch.object(CellAnalyzer, "calculate_metrics")
-@patch.object(CellAnalyzer, "update_labels")
+@patch.object(Session, "calculate_metrics")
 @pytest.mark.parametrize("cell_id", [1, 2])
 def test_add_cell_to_accepted(
-    mock_update_labels, mock_calculate_metrics, create_started_widget, cell_id
+    mock_calculate_metrics, create_started_widget, cell_id
 ):
     widget = create_started_widget
     widget.viewer.layers.events.removed.disconnect(widget.slot_layer_deleted)
     data = np.array([[0, 1, 1], [0, 1, 2], [0, 2, 1], [0, 2, 2]])
     assert cell_id not in widget.included
     metrics_len = len(widget.metric_data)
-    widget.add_cell_to_accepted(cell_id, data)
+    widget.session.add_cell_to_accepted(cell_id, data)
     assert cell_id in widget.included
     assert len(widget.metric_data) == metrics_len + 1
-    mock_update_labels.assert_called_once()
     mock_calculate_metrics.assert_called_once()
 
 
@@ -975,14 +982,14 @@ class TestCalculateMetrics:
         widget = create_widget
         widget.mean_size = 10
         widget.std_size = 10
-        widget.calculate_metrics()
+        widget.session.calculate_metrics()
         assert widget.mean_size == 0
         assert widget.std_size == 0
 
     def test_with_metrics(self, create_widget):
         widget = create_widget
         widget.metric_data = [(1, 100, (100, 100)), (2, 200, (200, 200))]
-        widget.calculate_metrics()
+        widget.session.calculate_metrics()
         assert widget.mean_size == 150
         assert widget.std_size == 50
 
@@ -1290,7 +1297,7 @@ def test_removed_layers_are_restored_before_next_action(create_widget):
 def _include_in_order(widget, ids):
     widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
     widget.start_analysis_on_click()
-    widget.include_multiple(ids)
+    widget.session.include_multiple(ids)
 
 
 def test_undo_removes_metrics_of_undone_cell(create_widget):
@@ -1603,8 +1610,8 @@ def test_cell_boxes_are_exact(create_widget):
     for id_ in np.unique(data)[1:]:
         coords = np.nonzero(data == id_)
         expected = tuple(slice(c.min(), c.max() + 1) for c in coords)
-        assert widget.cell_box(int(id_)) == expected
-    assert widget.cell_box(9999) is None
+        assert widget.session.cell_box(int(id_)) == expected
+    assert widget.session.cell_box(9999) is None
 
 
 def test_cell_boxes_include_excluded_cells_of_an_imported_session(
@@ -1614,36 +1621,36 @@ def test_cell_boxes_include_excluded_cells_of_an_imported_session(
     data = _labels(1, 3)
     widget.viewer.add_labels(data, name="labels")
     widget.rejected_cells[10:12, 5:8] = 2  # an excluded cell, not in the layer
-    widget.invalidate_boxes()
+    widget.session.invalidate_boxes()
 
-    assert widget.cell_box(2) == (slice(10, 12), slice(5, 8))
+    assert widget.session.cell_box(2) == (slice(10, 12), slice(5, 8))
 
 
 def test_cell_box_falls_back_to_searching(create_widget):
     widget = create_widget
     widget.viewer.add_labels(_labels(1, 2), name="labels")
 
-    with patch("mmv_h4cells._widget.MAX_CACHED_LABEL", 0):  # no index at all
-        widget.invalidate_boxes()
-        assert widget.get_boxes() == {}
-        assert widget.cell_box(2) == (slice(3, 5), slice(0, 2))
-    assert widget.get_boxes()[2] == (slice(3, 5), slice(0, 2))  # remembered
+    with patch("mmv_h4cells._session.MAX_CACHED_LABEL", 0):  # no index at all
+        widget.session.invalidate_boxes()
+        assert widget.session.get_boxes() == {}
+        assert widget.session.cell_box(2) == (slice(3, 5), slice(0, 2))
+    assert widget.session.get_boxes()[2] == (slice(3, 5), slice(0, 2))  # remembered
 
 
 def test_boxes_are_recomputed_after_the_layer_changes(create_widget):
     widget = create_widget
     layer = widget.viewer.add_labels(_labels(1, 2), name="labels")
-    assert widget.cell_box(1) == (slice(0, 2), slice(0, 2))
+    assert widget.session.cell_box(1) == (slice(0, 2), slice(0, 2))
 
     layer.events.paint(value=[])  # the user painted in the layer
-    assert widget._boxes is None
-    assert widget.cell_box(1) == (slice(0, 2), slice(0, 2))
+    assert widget.session._boxes is None
+    assert widget.session.cell_box(1) == (slice(0, 2), slice(0, 2))
 
     new_data = np.zeros_like(layer.data)
     new_data[10:13, 10:13] = 1
     layer.data = new_data  # the data was replaced
-    assert widget._boxes is None
-    assert widget.cell_box(1) == (slice(10, 13), slice(10, 13))
+    assert widget.session._boxes is None
+    assert widget.session.cell_box(1) == (slice(10, 13), slice(10, 13))
 
 
 def test_get_overlap_matches_the_full_image_computation(create_widget):
@@ -1669,7 +1676,7 @@ def test_get_overlap_matches_the_full_image_computation(create_widget):
         combined[np.nonzero(eval_cells)] += 1
         expected = set(map(tuple, np.transpose(np.where(combined == 2))))
 
-        assert widget.get_overlap() == expected
+        assert widget.session.get_overlap() == expected
 
 
 def test_display_cell_centers_the_camera_on_the_cell(create_widget):
@@ -1922,7 +1929,7 @@ def test_current_cell_of_an_untouched_layer_is_not_scanned(create_widget):
     widget.start_analysis_on_click()  # cell 1 is displayed
 
     with patch("numpy.nonzero", side_effect=AssertionError("scanned")):
-        labels, box = widget.get_current_cell()
+        labels, box = widget.session.get_current_cell()
 
     assert labels == {1}
     assert box == (slice(0, 2), slice(0, 2))
@@ -1951,7 +1958,7 @@ def test_current_cell_notices_manual_edits(create_widget, edit):
     widget.start_analysis_on_click()  # cell 1 is displayed
     edit(widget.current_cell_layer.data)
 
-    assert widget.get_current_cell() == _scan_current_cell(widget)
+    assert widget.session.get_current_cell() == _scan_current_cell(widget)
 
 
 def test_back_centers_the_camera_on_the_displayed_cell(widget_with_decisions):
