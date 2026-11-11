@@ -147,7 +147,11 @@ def read_zarr(path):
     except _ZARR_NOT_FOUND as e:
         # zarr does not raise FileNotFoundError for a missing store
         raise FileNotFoundError(f"No zarr store at {path}") from e
-    data_to_evaluate = zarr_file["data_to_valuate"][:]
+    # sessions exported by earlier versions used a misspelled dataset name
+    name = (
+        "data_to_evaluate" if "data_to_evaluate" in zarr_file else "data_to_valuate"
+    )
+    data_to_evaluate = zarr_file[name][:]
     accepted_cells = zarr_file["accepted_cells"][:]
     rejected_cells = zarr_file["rejected_cells"][:]
     flattened_data = zarr_file["data"][:]

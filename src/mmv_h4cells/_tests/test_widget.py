@@ -1476,3 +1476,98 @@ def test_undo_button_after_import(create_widget, tmp_path):
 
     widget.start_analysis_on_click()
     assert widget.btn_undo.isEnabled()
+
+
+# --- self drawn id bound / session state -----------------------------------
+
+
+def test_switching_label_layer_updates_selfdrawn_bound(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="first")
+    assert widget.selfdrawn_lower_bound == 3
+    second = np.zeros((30, 30), dtype=np.int32)
+    second[0:2, 0:2] = 9
+    second[5:7, 5:7] = 4
+    widget.viewer.add_labels(second, name="second")
+
+    with patch("mmv_h4cells._widget.ChoiceDialog") as mock_dialog:
+        mock_dialog.return_value.exec_.return_value = 1  # "second"
+        widget.start_analysis_on_click()
+
+    assert widget.layer_to_evaluate.name == "second"
+    assert widget.selfdrawn_lower_bound == 10
+    assert widget.accepted_cells.shape == (30, 30)
+    assert widget.remaining == {4, 9}
+
+
+def test_removing_the_label_layer_forgets_the_selfdrawn_bound(create_widget):
+    widget = create_widget
+    layer = widget.viewer.add_labels(_labels(1, 2), name="first")
+    assert widget.selfdrawn_lower_bound == 3
+    big = np.zeros((20, 20), dtype=np.int32)
+    big[0:2, 0:2] = 50
+
+    widget.viewer.layers.remove(layer)
+    widget.viewer.add_labels(big, name="other")
+
+    assert widget.selfdrawn_lower_bound == 51
+
+
+def test_import_session_with_only_excluded_cells(create_widget, tmp_path):
+    from mmv_h4cells._writer import write_zarr
+
+    widget = create_widget
+    data = np.zeros((10, 10), dtype=np.int32)
+    data[0:2, 0:2] = 1  # remaining
+    data[8:10, 8:10] = 3  # remaining
+    rejected = np.zeros_like(data)
+    rejected[4:6, 4:6] = 2  # excluded, no cell has been included
+    write_zarr(
+        tmp_path / "session.zarr",
+        data,
+        np.zeros_like(data),
+        rejected,
+        [],
+        (0.0, 0.0),
+        [2],
+        4,
+    )
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        return_value=str(tmp_path / "session.csv"),
+    ):
+        widget.import_on_click()
+
+    assert widget.excluded == {2}
+    assert set(np.unique(widget.rejected_cells)) == {0, 2}
+    assert widget.remaining == {1, 3}
+
+
+def test_import_keeps_the_stored_selfdrawn_bound(create_widget, tmp_path):
+    from mmv_h4cells._writer import write_zarr
+
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2), name="other layer")
+    data = np.zeros((10, 10), dtype=np.int32)
+    data[0:2, 0:2] = 1
+    data[4:6, 4:6] = 3
+    accepted = np.where(data == 1, data, 0)
+    write_zarr(
+        tmp_path / "session.zarr",
+        data,
+        accepted,
+        np.zeros_like(data),
+        [(1, 4, (0, 0))],
+        (4.0, 0.0),
+        [1],
+        7,  # differs from max id + 1 of the data
+    )
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        return_value=str(tmp_path / "session.csv"),
+    ):
+        widget.import_on_click()
+
+    assert widget.selfdrawn_lower_bound == 7

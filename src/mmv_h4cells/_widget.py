@@ -479,17 +479,26 @@ class CellAnalyzer(QWidget):
         self.logger.debug("Label layer is valid")
         self.set_label_layer(event.value)
 
+    def has_session_state(self) -> bool:
+        """Whether cells were already evaluated (e.g. an imported session)."""
+        return bool(self.metric_data or self.excluded or self.undo_stack)
+
     def set_label_layer(self, layer):
         self.logger.debug("Setting label layer...")
         starttime = time.time()
+        layer_changed = layer is not self.layer_to_evaluate
         self.layer_to_evaluate = layer
         self.btn_start_analysis.setEnabled(True)
         unique_ids = np.unique(self.layer_to_evaluate.data)
         self.logger.debug(f"{len(unique_ids)} unique ids found")
-        if self.selfdrawn_lower_bound is None:
+        if self.selfdrawn_lower_bound is None or (
+            layer_changed and not self.has_session_state()
+        ):
+            # ids of self drawn cells must not collide with the ids of the
+            # layer, so the bound belongs to the layer it was computed from
             self.selfdrawn_lower_bound = max(unique_ids) + 1
 
-        if len(self.metric_data) == 0:
+        if not self.has_session_state():
             self.accepted_cells = np.zeros_like(self.layer_to_evaluate.data)
             self.rejected_cells = np.zeros_like(self.layer_to_evaluate.data)
             self.remaining = set(unique_ids) - {0}

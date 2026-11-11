@@ -62,3 +62,42 @@ def test_zarr_roundtrip_without_included_cells(tmp_path):
     assert metric_data == []
     assert len(undo_stack) == 0
     assert selfdrawn_lower_bound == 2
+
+
+def _session(path):
+    from mmv_h4cells._writer import write_zarr
+
+    data = np.zeros((5, 5), dtype=np.int32)
+    data[1:3, 1:3] = 1
+    write_zarr(
+        path,
+        data,
+        np.zeros_like(data),
+        np.zeros_like(data),
+        [],
+        (0.0, 0.0),
+        [],
+        2,
+    )
+    return data
+
+
+def test_zarr_dataset_name_is_spelled_correctly(tmp_path):
+    path = tmp_path / "session.zarr"
+    _session(path)
+
+    assert (path / "data_to_evaluate").is_dir()
+    assert not (path / "data_to_valuate").exists()
+
+
+def test_read_zarr_written_with_the_old_dataset_name(tmp_path):
+    """Sessions exported by earlier versions used a misspelled name."""
+    from mmv_h4cells._reader import read_zarr
+
+    path = tmp_path / "session.zarr"
+    data = _session(path)
+    (path / "data_to_evaluate").rename(path / "data_to_valuate")
+
+    data_to_evaluate = read_zarr(path)[0]
+
+    assert np.array_equal(data_to_evaluate, data)
