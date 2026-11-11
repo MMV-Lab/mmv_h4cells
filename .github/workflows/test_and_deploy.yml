@@ -22,16 +22,18 @@ jobs:
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
+    # macOS is new here: show its result without failing the whole workflow
+    continue-on-error: ${{ matrix.platform == 'macos-latest' }}
     strategy:
       matrix:
-        platform: [ubuntu-latest, windows-latest] #, macos-latest] # macos runs into issues with deperaction
+        platform: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.11', '3.12', '3.13']
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -56,14 +58,18 @@ jobs:
 
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
-        uses: aganders3/headless-gui@v1
+        uses: aganders3/headless-gui@v2
         with:
           run: python -m tox
         env:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v7
+        with:
+          # uploads need a token: add CODECOV_TOKEN to the repository secrets
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   deploy:
     # this will run when you have tagged a commit, starting with "v*"
@@ -73,9 +79,9 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.ref, 'tags')
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Install dependencies

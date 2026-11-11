@@ -1,21 +1,21 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.2.0
+    rev: v6.0.0
     hooks:
       - id: check-docstring-first
       - id: end-of-file-fixer
       - id: trailing-whitespace
         exclude: ^\.napari-hub/.*
       - id: check-yaml # checks for correct yaml syntax for github actions ex.
-  - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.0.256
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
     hooks:
-      - id: ruff
+      - id: ruff-check
   - repo: https://github.com/psf/black
-    rev: 22.3.0
+    rev: 26.10.1
     hooks:
       - id: black
-  - repo: https://github.com/tlambert03/napari-plugin-checks
+  - repo: https://github.com/napari/napari-plugin-checks
     rev: v0.3.0
     hooks:
       - id: napari-plugin-checks

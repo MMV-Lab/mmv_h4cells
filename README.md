@@ -50,7 +50,13 @@ If you have only interrupted the evaluation and exported the previous results, y
 
 The analysis can be started by clicking on the "Start analysis" button. The next instance ID to be evaluated is shown next to "Start analysis at". To change the region of interest to be evaluated, a different ID can be entered there and the plugin will center on this within the next 2 decisions. Decisions are made by clicking the Include/Exclude button. If an instance is not completely recognized correctly, you can use the paint function of napari to correct this manually and then include the instance as usual using the button. The undo function can be used to undo the last decision and the "Draw own cell" button allows you to add unrecognized cells manually. This must be done cell by cell and confirmed each time using the button. The plugin does not allow other existing instances to be painted over. If this happens by mistake, a warning is displayed, oberlapping pixels are highlighted and users can either cancel via the cancel button within the warning or close the warning and correct this manually. 
 
-When an instance is included, the respective instance is written to a segmentation layer, which can be exported using the export function. In addition, the ID, the size and the centroid are exported as a .csv file. We also export a .zarr file, which makes it possible to re-import previously exported results, for example to pause the analysis. To enable a smooth re-import, the .csv and the .zarr file must have the same name stem, so please either do not rename the files or rename them in the same way. 
+When an instance is included, the respective instance is written to a segmentation layer, which can be exported using the export function. Exporting under a name creates three items next to each other:
+
+- `name.csv`: the ID, the size [px] and the centroid of every included cell, followed by the mean, the standard deviation and the threshold of the sizes.
+- `name.tiff`: the segmentation of the included cells (OME-TIFF).
+- `name.zarr`: a *folder* that holds everything needed to continue the analysis later, for example to pause it: the segmentation without the excluded cells, the included and the excluded cells, the metrics and the history for the undo function.
+
+To import a session, select the `.csv`; the `.zarr` folder is found by its name. To enable a smooth re-import, the .csv and the .zarr folder must have the same name stem, so please either do not rename them or rename them in the same way. If the folder is not found next to the .csv, you are asked to select it. Do not move or change the files inside the .zarr folder.
 
 For a better overview, the included/excluded/remaining instances can be viewed using the buttons at the bottom.
 
