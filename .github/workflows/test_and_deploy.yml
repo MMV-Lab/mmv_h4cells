@@ -47,14 +47,45 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # The default Ubuntu mirror of the runners (azure.archive.ubuntu.com)
-      # could not be resolved, so apt-get hung and timed out. Use the main
-      # Ubuntu mirror instead; the file is the list of mirrors apt reads.
-      - name: Use the main Ubuntu mirror
+      # The Ubuntu mirrors the runners use by default (azure.archive.ubuntu.com
+      # and archive.ubuntu.com) were not reachable at times, so apt-get hung
+      # and timed out. Use the mirrors that answer, as apt reads them from
+      # this list. The result is shown as annotations of the job.
+      - name: Choose reachable Ubuntu mirrors
         if: runner.os == 'Linux'
         run: |
-          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt || true
-          cat /etc/apt/apt-mirrors.txt || true
+          . /etc/os-release
+          candidates=(
+            https://mirrors.edge.kernel.org/ubuntu/
+            http://archive.ubuntu.com/ubuntu/
+            http://azure.archive.ubuntu.com/ubuntu/
+            https://mirror.us.leaseweb.net/ubuntu/
+            https://mirrors.ocf.berkeley.edu/ubuntu/
+            https://ubuntu.mirror.constant.com/
+            https://ftp.halifax.rwth-aachen.de/ubuntu/
+            https://mirrors.xtom.com/ubuntu/
+          )
+          selected=()
+          for mirror in "${candidates[@]}"; do
+            code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "${mirror}dists/${VERSION_CODENAME}/InRelease" || true)
+            if [ "$code" = "200" ]; then
+              selected+=("$mirror")
+              echo "::notice title=Ubuntu mirror::reachable: $mirror"
+            else
+              echo "::warning title=Ubuntu mirror::not reachable: $mirror (HTTP ${code:-none})"
+            fi
+          done
+          if [ "${#selected[@]}" -eq 0 ]; then
+            echo "::error title=Ubuntu mirror::no Ubuntu mirror is reachable from this runner"
+            exit 1
+          fi
+          sudo truncate -s 0 /etc/apt/apt-mirrors.txt
+          priority=1
+          for mirror in "${selected[@]:0:3}"; do
+            printf '%s\tpriority:%s\n' "$mirror" "$priority" | sudo tee -a /etc/apt/apt-mirrors.txt > /dev/null
+            priority=$((priority + 1))
+          done
+          cat /etc/apt/apt-mirrors.txt
 
       # the libraries Qt needs and a virtual display on linux
       - uses: pyvista/setup-headless-display-action@v5
