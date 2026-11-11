@@ -22,12 +22,22 @@ jobs:
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
+    # experimental jobs show their result without failing the workflow
+    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       # a failing platform must not hide the results of the others
       fail-fast: false
       matrix:
-        platform: [ubuntu-latest, windows-latest, macos-latest]
+        # ubuntu-24.04 instead of ubuntu-latest: the label is moving to
+        # Ubuntu 26.04, where installing the system libraries fails (apt
+        # exit codes 100 and 124). Switch back once that works.
+        platform: [ubuntu-24.04, windows-latest, macos-latest]
         python-version: ['3.11', '3.12', '3.13']
+        include:
+          # find out if the tests run on the new Ubuntu
+          - platform: ubuntu-26.04
+            python-version: '3.13'
+            experimental: true
 
     steps:
       - uses: actions/checkout@v7
