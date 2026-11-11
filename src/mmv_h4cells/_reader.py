@@ -1,5 +1,4 @@
 from qtpy.QtWidgets import QFileDialog
-from bioio import BioImage
 import zarr
 
 _ZARR_NOT_FOUND = getattr(zarr.errors, "PathNotFoundError", FileNotFoundError)
@@ -68,18 +67,11 @@ def napari_get_reader(path):
         same path or list of paths, and returns a list of layer data tuples.
     """
 
-    if path.suffix == ".tiff" or path.suffix == ".tif":
-        return read_tiff
-    
     if path.suffix == ".zarr":
         return read_zarr
 
     return None
 
-
-def read_tiff(path): # unused
-    data = BioImage(path).get_image_data("YX")
-    return data.astype("int32")
 
 def read_zarr(path):
     try:

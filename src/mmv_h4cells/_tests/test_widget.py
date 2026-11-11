@@ -1982,3 +1982,66 @@ def test_show_remaining_matches_the_full_image_computation(create_widget):
     expected = np.where(np.isin(working, list(widget.remaining)), working, 0)
     assert np.array_equal(widget.remaining_layer.data, expected)
     assert set(np.unique(expected)) - {0} == {int(i) for i in widget.remaining}
+
+
+# --- next id and logging -------------------------------------------------------
+
+
+def _assert_next_id(widget, expected):
+    assert widget.next_id == expected
+    if expected is None:
+        assert widget.lineedit_next_id.text() == ""
+    else:
+        assert type(widget.next_id) is int
+        assert widget.lineedit_next_id.text() == str(expected)
+
+
+def test_next_id_is_an_int_or_none(create_widget):
+    widget = create_widget
+    widget.viewer.add_labels(_labels(1, 2, 3), name="labels")
+    _assert_next_id(widget, 1)  # the cell the analysis starts with
+
+    widget.start_analysis_on_click()  # cell 1 is shown
+    _assert_next_id(widget, 2)
+    widget.include_on_click()  # cell 2 is shown
+    _assert_next_id(widget, 3)
+    widget.include_on_click()  # cell 3 is shown, no other one remains
+    _assert_next_id(widget, None)
+
+    widget.undo_on_click()
+    assert widget.next_id is None or type(widget.next_id) is int
+
+
+def test_next_id_after_import_and_removing_the_layer(create_widget, tmp_path):
+    widget = create_widget
+    _write_session(tmp_path / "session.zarr")  # cell 3 remains
+
+    with patch(
+        "mmv_h4cells._widget.open_dialog",
+        return_value=str(tmp_path / "session.csv"),
+    ):
+        widget.import_on_click()
+    _assert_next_id(widget, 3)
+
+    widget.viewer.layers.remove(widget.layer_to_evaluate)
+    _assert_next_id(widget, None)
+
+
+def test_the_widget_leaves_logging_to_the_application(create_widget):
+    import logging
+
+    logger = logging.getLogger("mmv_h4cells._widget")
+
+    assert not logger.handlers
+    assert logger.level == logging.NOTSET
+    assert logger.propagate
+
+
+def test_debug_messages_can_be_enabled(make_napari_viewer, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="mmv_h4cells")
+
+    CellAnalyzer(make_napari_viewer())
+
+    assert "Initializing CellAnalyzer" in caplog.text

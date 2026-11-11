@@ -1,22 +1,20 @@
 import numpy as np
+import pytest
 
 from pathlib import Path
-import tifffile
 from mmv_h4cells._reader import napari_get_reader
 
 
-def test_csv_is_not_a_session_format():
-    """The csv is only a report; sessions are read from the .zarr."""
-    assert napari_get_reader(Path("session.csv")) is None
+@pytest.mark.parametrize(
+    "filename", ["session.csv", "image.tiff", "image.tif"]
+)
+def test_only_zarr_is_a_session_format(filename):
+    """The csv is only a report and images are opened by napari itself."""
+    assert napari_get_reader(Path(filename)) is None
 
 
-def test_reader_tiff(tmp_path):
-    my_test_file = Path(tmp_path / "myfile.tiff")
-    data = np.random.rand(10,10)
-    tifffile.imwrite(my_test_file, data)
-    
-    reader = napari_get_reader(my_test_file)
-    assert callable(reader)
+def test_zarr_is_a_session_format():
+    assert callable(napari_get_reader(Path("session.zarr")))
 
 
 def test_get_reader_pass():

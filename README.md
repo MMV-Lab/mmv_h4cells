@@ -77,6 +77,18 @@ This is a tool for analyzing cells. However, we do not catch every possible erro
 
 - Do not create new layers during the analysis.
 
+### Debug output
+
+The plugin does not print debug messages by default. To see them, for example
+in the napari console, enable them for the plugin:
+
+```python
+import logging
+
+logging.getLogger("mmv_h4cells").addHandler(logging.StreamHandler())
+logging.getLogger("mmv_h4cells").setLevel(logging.DEBUG)
+```
+
 ## Contributing
 
 Contributions are very welcome. Tests can be run with [tox], please ensure
