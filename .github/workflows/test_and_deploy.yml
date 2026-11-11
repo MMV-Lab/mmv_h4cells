@@ -22,9 +22,9 @@ jobs:
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
-    # macOS is new here: show its result without failing the whole workflow
-    continue-on-error: ${{ matrix.platform == 'macos-latest' }}
     strategy:
+      # a failing platform must not hide the results of the others
+      fail-fast: false
       matrix:
         platform: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.11', '3.12', '3.13']
@@ -37,8 +37,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # these libraries enable testing on Qt on linux
-      - uses: tlambert03/setup-qt-libs@v1
+      # the libraries Qt needs and a virtual display on linux
+      - uses: pyvista/setup-headless-display-action@v5
+        if: runner.os == 'Linux'
+        with:
+          qt: true
+          pyvista: false
 
       # strategy borrowed from vispy for installing opengl libs on windows
       - name: Install Windows OpenGL
