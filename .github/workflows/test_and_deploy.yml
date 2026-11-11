@@ -47,6 +47,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # The default Ubuntu mirror of the runners (azure.archive.ubuntu.com)
+      # could not be resolved, so apt-get hung and timed out. Use the main
+      # Ubuntu mirror instead; the file is the list of mirrors apt reads.
+      - name: Use the main Ubuntu mirror
+        if: runner.os == 'Linux'
+        run: |
+          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt || true
+          cat /etc/apt/apt-mirrors.txt || true
+
       # the libraries Qt needs and a virtual display on linux
       - uses: pyvista/setup-headless-display-action@v5
         if: runner.os == 'Linux'
